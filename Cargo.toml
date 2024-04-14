@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.82"
 piet = { version = "0.6.2", features = ["png"] }
 piet-common = { version = "0.6.2", features = ["png"] }
 png = "0.17.13"

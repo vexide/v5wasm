@@ -2,12 +2,17 @@
 
 // You can execute this example with `cargo run --example linking`
 
+use std::ffi::CStr;
 use std::fs::File;
 use std::io::BufWriter;
 use std::time::Instant;
 
-use piet::ImageFormat;
-use piet::{kurbo::Rect, Color, RenderContext};
+use anyhow::Context;
+use piet::{
+    kurbo::{Circle, Rect},
+    Color, FontFamily, ImageFormat, RenderContext, Text, TextAttribute, TextLayout,
+    TextLayoutBuilder,
+};
 use piet_common::kurbo::{Point, Size};
 use piet_common::{BitmapTarget, Device};
 use png::{ColorType, Encoder};
@@ -19,7 +24,9 @@ const DISPLAY_WIDTH: usize = 480;
 struct SdkState<'a> {
     program_start: Instant,
     foreground_color: Color,
+    background_color: Color,
     display: BitmapTarget<'a>,
+    mono_font: piet::FontFamily,
 }
 
 impl<'a> SdkState<'a> {
@@ -67,15 +74,20 @@ map_jump_table! {
             Ok(caller.data().program_start.elapsed().as_micros() as u64)
         },
         0x640 => fn vexDisplayForegroundColor(mut caller: Caller<'_, SdkState>, col: u32) {
-            println!("vexDisplayForegroundColor({:x})", col);
             caller.data_mut().foreground_color = Color::rgb8(
                 (col >> 16) as u8,
                 (col >> 8) as u8,
                 col as u8,
             );
         },
-        0x670 => fn vexDisplayRectFill(mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32) -> () {
-            println!("vexDisplayRectFill({}, {}, {}, {})", x1, y1, x2, y2);
+        0x644 => fn vexDisplayBackgroundColor(mut caller: Caller<'_, SdkState>, col: u32) {
+            caller.data_mut().background_color = Color::rgb8(
+                (col >> 16) as u8,
+                (col >> 8) as u8,
+                col as u8,
+            );
+        },
+        0x670 => fn vexDisplayRectFill(mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32)  {
             let rect = Rect::new(x1 as f64, y1 as f64, x2 as f64, y2 as f64);
             let fg_color = caller.data().foreground_color;
             {
@@ -84,13 +96,39 @@ map_jump_table! {
                 rc.finish().unwrap();
             }
             caller.data_mut().save_display().unwrap();
+        },
+        0x674 => fn vexDisplayCircleDraw(mut caller: Caller<'_, SdkState>, xc: i32, yc: i32, radius: i32) {
+            println!("vexDisplayCircleDraw({}, {}, {})", xc, yc, radius);
+            let circle = Circle::new((xc as f64, yc as f64), radius as f64);
+            let fg_color = caller.data().foreground_color;
+            {
+                let mut rc = caller.data_mut().display.render_context();
+                rc.stroke(circle, &fg_color, 1.0);
+                rc.finish().unwrap();
+            }
+            caller.data_mut().save_display().unwrap();
+        },
+        0x684 => fn vexDisplayVString(mut caller: Caller<'_, SdkState>, line_number: i32, format_ptr: u32, _args: u32) -> () {
+            println!("vexDisplayVString({}, {:x}, {:x})", line_number, format_ptr, _args);
+            let format = memory.read_c_string(&caller, format_ptr as usize).context("Failed to read C-string")?.to_string();
+            let fg_color = caller.data().foreground_color;
+            let background_color = caller.data().background_color;
+            let font = caller.data().mono_font.clone();
+            {
+                let mut rc = caller.data_mut().display.render_context();
+                let text_layout = rc.text().new_text_layout(format)
+                    .text_color(fg_color)
+                    .font(font, 16.0)
+                    .build().unwrap();
+                let y_offset = line_number as f64 * 20.0 + 0x20 as f64;
+                let size = text_layout.size();
+                let bg_rect = Rect::new(0.0, y_offset + 2.0, size.width, y_offset + size.height - 2.0);
+                rc.fill(bg_rect, &background_color);
+                rc.draw_text(&text_layout, (0.0, y_offset - 2.0));
+                rc.finish().unwrap();
+            }
+            caller.data_mut().save_display().unwrap();
             Ok(())
-        },
-        0x674 => fn vexDisplayCircleDraw(xc: i32, yc: i32, radius: i32) {
-            println!("TODO: vexDisplayCircleDraw({}, {}, {})", xc, yc, radius);
-        },
-        0x684 => fn vexDisplayVString(line_number: i32, format_ptr: u32, args: u32) {
-            println!("TODO: vexDisplayVString({}, {:x}, {:x})", line_number, format_ptr, args);
         },
         0x8ac => fn vexSerialWriteFree(_channel: u32) -> i32 {
             Ok(2048)
@@ -117,7 +155,7 @@ fn main() -> Result<()> {
     let mut display = renderer
         .bitmap_target(DISPLAY_WIDTH, DISPLAY_HEIGHT, 1.0)
         .unwrap();
-    {
+    let mono_font = {
         let mut rc = display.render_context();
         rc.fill(
             Rect::new(0.0, 0.0, DISPLAY_WIDTH as f64, DISPLAY_HEIGHT as f64),
@@ -128,11 +166,15 @@ fn main() -> Result<()> {
             &Color::AQUA,
         );
         rc.finish().unwrap();
-    }
+        let noto_sans_mono = include_bytes!("../fonts/NotoSansMono-Regular.ttf");
+        rc.text().load_font(noto_sans_mono).unwrap()
+    };
     let mut state = SdkState {
         program_start: Instant::now(),
         foreground_color: Color::WHITE,
+        background_color: Color::BLACK,
         display,
+        mono_font,
     };
     state.save_display().unwrap();
     let mut store = Store::new(&engine, state);
@@ -236,4 +278,16 @@ macro_rules! map_jump_table {
             }
         }
     };
+}
+
+trait MemoryExt {
+    fn read_c_string<'a>(&self, store: &'a impl AsContext, offset: usize) -> Option<&'a str>;
+}
+
+impl MemoryExt for Memory {
+    fn read_c_string<'a>(&self, store: &'a impl AsContext, offset: usize) -> Option<&'a str> {
+        let bytes = &self.data(store)[offset..];
+        let c_str = CStr::from_bytes_until_nul(bytes).ok()?;
+        c_str.to_str().ok()
+    }
 }
