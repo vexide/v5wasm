@@ -2,13 +2,51 @@
 
 // You can execute this example with `cargo run --example linking`
 
+use std::fs::File;
+use std::io::BufWriter;
 use std::time::Instant;
 
+use piet::ImageFormat;
+use piet::{kurbo::Rect, Color, RenderContext};
+use piet_common::kurbo::{Point, Size};
+use piet_common::{BitmapTarget, Device};
+use png::{ColorType, Encoder};
 use wasmtime::*;
 
-struct SdkState {
+const DISPLAY_HEIGHT: usize = 272;
+const DISPLAY_WIDTH: usize = 480;
+
+struct SdkState<'a> {
     program_start: Instant,
-    foreground_color: u32,
+    foreground_color: Color,
+    display: BitmapTarget<'a>,
+}
+
+impl<'a> SdkState<'a> {
+    fn save_display(&mut self) -> std::result::Result<(), piet::Error> {
+        {
+            let mut rc = self.display.render_context();
+            rc.fill(
+                Rect::new(0.0, 0.0, DISPLAY_WIDTH as f64, 0x20 as f64),
+                &Color::AQUA,
+            );
+            rc.finish().unwrap();
+        }
+        let mut data = vec![0; DISPLAY_HEIGHT * DISPLAY_WIDTH * 4];
+        self.display
+            .copy_raw_pixels(ImageFormat::RgbaPremul, &mut data)?;
+        piet::util::unpremultiply_rgba(&mut data);
+        let file = BufWriter::new(File::create("display.png").map_err(Into::<Box<_>>::into)?);
+        let mut encoder = Encoder::new(file, DISPLAY_WIDTH as u32, DISPLAY_HEIGHT as u32);
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .map_err(Into::<Box<_>>::into)?
+            .write_image_data(&data)
+            .map_err(Into::<Box<_>>::into)?;
+        Ok(())
+    }
 }
 
 map_jump_table! {
@@ -29,11 +67,24 @@ map_jump_table! {
             Ok(caller.data().program_start.elapsed().as_micros() as u64)
         },
         0x640 => fn vexDisplayForegroundColor(mut caller: Caller<'_, SdkState>, col: u32) {
-            println!("TODO: vexDisplayForegroundColor({:x})", col);
-            caller.data_mut().foreground_color = col;
+            println!("vexDisplayForegroundColor({:x})", col);
+            caller.data_mut().foreground_color = Color::rgb8(
+                (col >> 16) as u8,
+                (col >> 8) as u8,
+                col as u8,
+            );
         },
-        0x670 => fn vexDisplayRectFill(x1: i32, y1: i32, x2: i32, y2: i32) {
-            println!("TODO: vexDisplayRectFill({}, {}, {}, {})", x1, y1, x2, y2);
+        0x670 => fn vexDisplayRectFill(mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32) -> () {
+            println!("vexDisplayRectFill({}, {}, {}, {})", x1, y1, x2, y2);
+            let rect = Rect::new(x1 as f64, y1 as f64, x2 as f64, y2 as f64);
+            let fg_color = caller.data().foreground_color;
+            {
+                let mut rc = caller.data_mut().display.render_context();
+                rc.fill(rect, &fg_color);
+                rc.finish().unwrap();
+            }
+            caller.data_mut().save_display().unwrap();
+            Ok(())
         },
         0x674 => fn vexDisplayCircleDraw(xc: i32, yc: i32, radius: i32) {
             println!("TODO: vexDisplayCircleDraw({}, {}, {})", xc, yc, radius);
@@ -62,13 +113,29 @@ fn main() -> Result<()> {
         "../vexide-wasm/target/wasm32-unknown-unknown/debug/examples/basic.wasm",
     )?;
     println!("Booting...");
-    let mut store = Store::new(
-        &engine,
-        SdkState {
-            program_start: Instant::now(),
-            foreground_color: 0xffffff,
-        },
-    );
+    let mut renderer = Device::new().unwrap();
+    let mut display = renderer
+        .bitmap_target(DISPLAY_WIDTH, DISPLAY_HEIGHT, 1.0)
+        .unwrap();
+    {
+        let mut rc = display.render_context();
+        rc.fill(
+            Rect::new(0.0, 0.0, DISPLAY_WIDTH as f64, DISPLAY_HEIGHT as f64),
+            &Color::BLACK,
+        );
+        rc.fill(
+            Rect::new(0.0, 0.0, DISPLAY_WIDTH as f64, 0x20 as f64),
+            &Color::AQUA,
+        );
+        rc.finish().unwrap();
+    }
+    let mut state = SdkState {
+        program_start: Instant::now(),
+        foreground_color: Color::WHITE,
+        display,
+    };
+    state.save_display().unwrap();
+    let mut store = Store::new(&engine, state);
     let imports = module
         .imports()
         .filter_map(|i| match i.ty() {

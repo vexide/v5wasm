@@ -4,4 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wasmtime = "19.0.2"
+piet = { version = "0.6.2", features = ["png"] }
+piet-common = { version = "0.6.2", features = ["png"] }
+png = "0.17.13"
+wasmtime = { version = "19.0.2", default-features = false, features = [
+    # "cache",
+    "parallel-compilation",
+    "cranelift",
+    # "pooling-allocator",
+    "demangle",
+    "addr2line",
+    "coredump",
+    "debug-builtins",
+    "runtime",
+] }
