@@ -18,7 +18,7 @@
                 "isDefault": true
             },
             "options": {
-                "cwd": "${workspaceFolder}/../vexide"
+                "cwd": "${workspaceFolder}/../vexide-wasm"
             },
             "label": "rust: build vexide",
         }
