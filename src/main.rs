@@ -18,7 +18,7 @@ use piet_common::{BitmapTarget, Device};
 use png::{ColorType, Encoder};
 use wasmtime::*;
 
-use crate::sdk::{Sdk, SdkState};
+use crate::sdk::{JumpTable, SdkState};
 
 mod sdk;
 
@@ -71,8 +71,8 @@ fn main() -> Result<()> {
     let memory_size = memory.size(&store);
     memory.grow(&mut store, target_pages - memory_size)?;
 
-    let sdk = Sdk::new(&mut store, memory);
-    sdk.expose_jump_table(&mut store, &table, &memory)?;
+    let sdk = JumpTable::new(&mut store, memory);
+    sdk.expose(&mut store, &table, &memory)?;
 
     println!("_entry()");
     let run = instance.get_typed_func::<(), ()>(&mut store, "_entry")?;

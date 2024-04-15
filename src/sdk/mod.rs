@@ -1,20 +1,20 @@
-use std::{ffi::CStr, time::Instant};
+use std::{
+    collections::HashMap,
+    ffi::CStr,
+    ops::{Index, IndexMut},
+    time::Instant,
+};
 
 use anyhow::Context;
-use piet::{
-    kurbo::{Circle, Rect, Shape},
-    Color, FontFamily, ImageFormat, IntoBrush, RenderContext, Text, TextAttribute, TextLayout,
-    TextLayoutBuilder,
-};
 use piet_common::{
     kurbo::{Point, Size},
     Piet,
 };
 use piet_common::{BitmapTarget, Device};
 use png::{ColorType, Encoder};
-use wasmtime::{AsContext, Caller, Memory};
+use wasmtime::*;
 
-use self::display::{ColorExt, Display, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+use self::display::{build_display_jump_table, ColorExt, Display, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 
 mod display;
 
@@ -34,106 +34,101 @@ impl<'a> SdkState<'a> {
 
 const JUMP_TABLE_START: usize = 0x037FC000;
 
-macro_rules! map_jump_table {
-    {
-        state = $State:ty;
-        memory as $memory:ident;
-        $Sdk:ident {
-            $(
-                $offset:expr =>
-                fn $name:ident($($args:tt)*) $(-> $ret:ty)? $block:block
-            ),+ $(,)?
-        }
-    } => {
-        pub struct $Sdk {
-            api: Vec<(usize, ::wasmtime::Func)>,
-        }
-
-        impl $Sdk {
-            pub fn new(store: &mut ::wasmtime::Store<$State>, memory: ::wasmtime::Memory) -> Self {
-                let $memory = memory;
-                Self {
-                    api: vec![
-                        $(
-                            (
-                                JUMP_TABLE_START + $offset,
-                                ::wasmtime::Func::wrap(
-                                    &mut *store,
-                                    move |$($args)*| $(-> ::wasmtime::Result<$ret>)? {
-                                        $block
-                                    }
-                                )
-                            )
-                        ),+
-                    ],
-                }
-            }
-
-            pub fn expose_jump_table(
-                self,
-                store: &mut ::wasmtime::Store<$State>,
-                table: &::wasmtime::Table,
-                memory: &::wasmtime::Memory
-            ) -> ::wasmtime::Result<()> {
-                let sdk_base = table.size(&mut *store);
-                let api_size = self.api.len() as u32;
-                table.grow(&mut *store, api_size, ::wasmtime::Ref::Func(None))?;
-                for (offset, (address, method)) in self.api.into_iter().enumerate() {
-                    let sdk_index = sdk_base + (offset as u32);
-                    table.set(&mut *store, sdk_index, ::wasmtime::Ref::Func(Some(method)))?;
-                    memory.write(&mut *store, address, &sdk_index.to_le_bytes())?;
-                }
-                println!("Jump table exposed with {api_size} functions");
-                Ok(())
-            }
-        }
-    };
+pub struct JumpTableBuilder<'a, 'b> {
+    store: &'a mut Store<SdkState<'b>>,
+    jump_table: JumpTable,
 }
 
-map_jump_table! {
-    state = SdkState;
-    memory as memory;
-    Sdk {
-        0x89c => fn vexSerialWriteBuffer(caller: Caller<'_, SdkState>, channel: i32, data: i32, data_len: i32) -> i32 {
-            if channel == 1 {
-                let data_bytes =
-                    memory.data(&caller)[data as usize..(data + data_len) as usize].to_vec();
-                let data_str = String::from_utf8(data_bytes).unwrap();
-                print!("{}", data_str);
+impl<'a, 'b> JumpTableBuilder<'a, 'b> {
+    /// Inserts a function into the jump table at the given address.
+    pub fn insert<Params, Results>(
+        &mut self,
+        address: usize,
+        func: impl IntoFunc<SdkState<'b>, Params, Results>,
+    ) {
+        let func = Func::wrap(&mut self.store, func);
+        self.jump_table.api.insert(address, func);
+    }
+}
+
+pub struct JumpTable {
+    api: HashMap<usize, Func>,
+}
+
+impl JumpTable {
+    /// Creates a new jump table using the given memory, and populates it with the default API.
+    pub fn new(store: &mut Store<SdkState>, memory: Memory) -> Self {
+        let mut builder = JumpTableBuilder {
+            store,
+            jump_table: JumpTable {
+                api: HashMap::new(),
+            },
+        };
+
+        build_display_jump_table(memory, &mut builder);
+
+        // vexSerialWriteBuffer
+        builder.insert(
+            0x89c,
+            move |caller: Caller<'_, SdkState>,
+                  channel: i32,
+                  data: i32,
+                  data_len: i32|
+                  -> Result<i32> {
+                {
+                    if channel == 1 {
+                        let data_bytes = memory.data(&caller)
+                            [data as usize..(data + data_len) as usize]
+                            .to_vec();
+                        let data_str = String::from_utf8(data_bytes).unwrap();
+                        print!("{}", data_str);
+                    }
+                    Ok(data_len)
+                }
+            },
+        );
+
+        // vexTasksRun
+        builder.insert(0x05c, move || {});
+
+        // vexSystemHighResTimeGet
+        builder.insert(0x134, move |caller: Caller<'_, SdkState>| -> Result<u64> {
+            {
+                Ok(caller.data().program_start.elapsed().as_micros() as u64)
             }
-            Ok(data_len)
-        },
-        0x05c => fn vexTasksRun() {},
-        0x134 => fn vexSystemHighResTimeGet(caller: Caller<'_, SdkState>) -> u64 {
-            Ok(caller.data().program_start.elapsed().as_micros() as u64)
-        },
-        0x640 => fn vexDisplayForegroundColor(mut caller: Caller<'_, SdkState>, col: u32) {
-            caller.data_mut().display.foreground_color = Color::from_rgb_u32(col);
-        },
-        0x644 => fn vexDisplayBackgroundColor(mut caller: Caller<'_, SdkState>, col: u32) {
-            caller.data_mut().display.background_color = Color::from_rgb_u32(col);
-        },
-        0x670 => fn vexDisplayRectFill(mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32)  {
-            let rect = Rect::new(x1 as f64, y1 as f64, x2 as f64, y2 as f64);
-            caller.data_mut().display.draw(rect, false).unwrap();
-        },
-        0x674 => fn vexDisplayCircleDraw(mut caller: Caller<'_, SdkState>, xc: i32, yc: i32, radius: i32) {
-            println!("vexDisplayCircleDraw({}, {}, {})", xc, yc, radius);
-            let circle = Circle::new((xc as f64, yc as f64), radius as f64);
-            caller.data_mut().display.draw(circle, true).unwrap();
-        },
-        0x684 => fn vexDisplayVString(mut caller: Caller<'_, SdkState>, line_number: i32, format_ptr: u32, _args: u32) -> () {
-            println!("vexDisplayVString({}, {:x}, {:x})", line_number, format_ptr, _args);
-            let format = memory.read_c_string(&caller, format_ptr as usize).context("Failed to read C-string")?.to_string();
-            caller.data_mut().display.write_text(format, line_number).unwrap();
-            Ok(())
-        },
-        0x8ac => fn vexSerialWriteFree(_channel: u32) -> i32 {
-            Ok(2048)
-        },
-        0x130 => fn vexSystemExitRequest() {
+        });
+
+        // vexSerialWriteFree
+        builder.insert(0x8ac, move |_channel: u32| -> Result<i32> {
+            {
+                Ok(2048)
+            }
+        });
+
+        // vexSystemExitRequest
+        builder.insert(0x130, move || {
             std::process::exit(0);
-        },
+        });
+
+        builder.jump_table
+    }
+
+    /// Applies the memory and table changes required to expose the jump table to the WebAssembly module.
+    pub fn expose(self, store: &mut Store<SdkState>, table: &Table, memory: &Memory) -> Result<()> {
+        let sdk_base = table.size(&mut *store);
+        let api_size = self.api.len() as u32;
+        table.grow(&mut *store, api_size, Ref::Func(None))?;
+        for (offset, (address, method)) in self.api.into_iter().enumerate() {
+            let sdk_index = sdk_base + (offset as u32);
+            table.set(&mut *store, sdk_index, Ref::Func(Some(method)))?;
+            memory.write(
+                &mut *store,
+                JUMP_TABLE_START + address,
+                &sdk_index.to_le_bytes(),
+            )?;
+        }
+        println!("Jump table exposed with {api_size} functions");
+        Ok(())
     }
 }
 

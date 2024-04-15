@@ -4,6 +4,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use anyhow::Context;
 use piet::{
     kurbo::{Circle, Rect, Shape},
     Color, FontFamily, ImageFormat, IntoBrush, RenderContext, Text, TextAttribute, TextLayout,
@@ -15,6 +16,66 @@ use piet_common::{
 };
 use piet_common::{BitmapTarget, Device};
 use png::{ColorType, Encoder};
+use wasmtime::*;
+
+use super::{JumpTable, JumpTableBuilder, MemoryExt, SdkState};
+
+// MARK: Jump Table
+
+pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) {
+    // vexDisplayForegroundColor
+    builder.insert(0x640, move |mut caller: Caller<'_, SdkState>, col: u32| {
+        caller.data_mut().display.foreground_color = Color::from_rgb_u32(col);
+    });
+
+    // vexDisplayBackgroundColor
+    builder.insert(0x644, move |mut caller: Caller<'_, SdkState>, col: u32| {
+        caller.data_mut().display.background_color = Color::from_rgb_u32(col);
+    });
+
+    // vexDisplayRectFill
+    builder.insert(
+        0x670,
+        move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
+            let rect = Rect::new(x1 as f64, y1 as f64, x2 as f64, y2 as f64);
+            caller.data_mut().display.draw(rect, false).unwrap();
+        },
+    );
+
+    // vexDisplayCircleDraw
+    builder.insert(
+        0x674,
+        move |mut caller: Caller<'_, SdkState>, xc: i32, yc: i32, radius: i32| {
+            let circle = Circle::new((xc as f64, yc as f64), radius as f64);
+            caller.data_mut().display.draw(circle, true).unwrap();
+        },
+    );
+
+    // vexDisplayVString
+    builder.insert(
+        0x684,
+        move |mut caller: Caller<'_, SdkState>,
+              line_number: i32,
+              format_ptr: u32,
+              _args: u32|
+              -> Result<()> {
+            {
+                let format = memory
+                    .read_c_string(&caller, format_ptr as usize)
+                    .context("Failed to read C-string")?
+                    .to_string();
+                caller
+                    .data_mut()
+                    .display
+                    .write_text(format, line_number)
+                    .unwrap();
+                Ok(())
+            }
+        },
+    );
+}
+
+// MARK: API
 
 pub const DISPLAY_HEIGHT: usize = 272;
 pub const DISPLAY_WIDTH: usize = 480;
@@ -58,7 +119,7 @@ impl<'a> Display<'a> {
             width,
             height,
         };
-        display.erase();
+        display.erase()?;
         Ok(display)
     }
 
@@ -124,7 +185,7 @@ impl<'a> Display<'a> {
     }
 
     pub fn write_text(&mut self, text: String, line_number: i32) -> Result<(), piet::Error> {
-        let text = text.replace("\n", ".");
+        let text = text.replace('\n', ".");
         let fg = self.foreground_color;
         let bg = self.background_color;
         let font = self.mono_font.clone();
