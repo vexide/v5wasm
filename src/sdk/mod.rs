@@ -65,16 +65,13 @@ impl JumpTable {
                   data: i32,
                   data_len: i32|
                   -> Result<i32> {
-                {
-                    if channel == 1 {
-                        let data_bytes = memory.data(&caller)
-                            [data as usize..(data + data_len) as usize]
-                            .to_vec();
-                        let data_str = String::from_utf8(data_bytes).unwrap();
-                        print!("{}", data_str);
-                    }
-                    Ok(data_len)
+                if channel == 1 {
+                    let data_bytes =
+                        memory.data(&caller)[data as usize..(data + data_len) as usize].to_vec();
+                    let data_str = String::from_utf8(data_bytes).unwrap();
+                    print!("{}", data_str);
                 }
+                Ok(data_len)
             },
         );
 
@@ -83,17 +80,11 @@ impl JumpTable {
 
         // vexSystemHighResTimeGet
         builder.insert(0x134, move |caller: Caller<'_, SdkState>| -> Result<u64> {
-            {
-                Ok(caller.data().program_start.elapsed().as_micros() as u64)
-            }
+            Ok(caller.data().program_start.elapsed().as_micros() as u64)
         });
 
         // vexSerialWriteFree
-        builder.insert(0x8ac, move |_channel: u32| -> Result<i32> {
-            {
-                Ok(2048)
-            }
-        });
+        builder.insert(0x8ac, move |_channel: u32| -> Result<i32> { Ok(2048) });
 
         // vexSystemExitRequest
         builder.insert(0x130, move || {
@@ -133,3 +124,13 @@ impl MemoryExt for Memory {
         c_str.to_str().ok()
     }
 }
+
+macro_rules! read_c_string {
+    ($addr:expr, from $caller:ident using $memory:ident) => {
+        $memory
+            .read_c_string(&mut $caller, $addr)
+            .context("Failed to read C-string")
+            .map(|s| s.to_string())
+    };
+}
+pub(crate) use read_c_string;

@@ -14,7 +14,7 @@ use piet_common::{BitmapTarget, Device};
 use png::{ColorType, Encoder};
 use wasmtime::*;
 
-use super::{JumpTableBuilder, MemoryExt, SdkState};
+use super::{read_c_string, JumpTableBuilder, MemoryExt, SdkState};
 
 // MARK: Jump Table
 
@@ -55,18 +55,13 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               format_ptr: u32,
               _args: u32|
               -> Result<()> {
-            {
-                let format = memory
-                    .read_c_string(&caller, format_ptr as usize)
-                    .context("Failed to read C-string")?
-                    .to_string();
-                caller
-                    .data_mut()
-                    .display
-                    .write_text(format, line_number)
-                    .unwrap();
-                Ok(())
-            }
+            let format = read_c_string!(format_ptr as usize, from caller using memory)?;
+            caller
+                .data_mut()
+                .display
+                .write_text(format, line_number, true)
+                .unwrap();
+            Ok(())
         },
     );
 }
@@ -180,7 +175,12 @@ impl<'a> Display<'a> {
         )
     }
 
-    pub fn write_text(&mut self, text: String, line_number: i32) -> Result<(), piet::Error> {
+    pub fn write_text(
+        &mut self,
+        text: String,
+        line_number: i32,
+        opaque: bool,
+    ) -> Result<(), piet::Error> {
         let text = text.replace('\n', ".");
         let fg = self.foreground_color;
         let bg = self.background_color;
@@ -193,11 +193,15 @@ impl<'a> Display<'a> {
                 .text_color(fg)
                 .font(font, 16.0)
                 .build()?;
+
             let y_coord = line_number as f64 * 20.0 + HEADER_HEIGHT as f64;
-            rc.fill(
-                Display::calculate_text_background(&text_layout, y_coord),
-                &bg,
-            );
+            if opaque {
+                rc.fill(
+                    Display::calculate_text_background(&text_layout, y_coord),
+                    &bg,
+                );
+            }
+
             rc.draw_text(&text_layout, (0.0, y_coord - 2.0));
             rc.finish()?;
         }
