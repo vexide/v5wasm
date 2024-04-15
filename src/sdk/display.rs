@@ -7,18 +7,14 @@ use std::{
 use anyhow::Context;
 use piet::{
     kurbo::{Circle, Rect, Shape},
-    Color, FontFamily, ImageFormat, IntoBrush, RenderContext, Text, TextAttribute, TextLayout,
-    TextLayoutBuilder,
+    Color, ImageFormat, RenderContext, Text, TextLayout, TextLayoutBuilder,
 };
-use piet_common::{
-    kurbo::{Point, Size},
-    Piet, PietTextLayout,
-};
+use piet_common::PietTextLayout;
 use piet_common::{BitmapTarget, Device};
 use png::{ColorType, Encoder};
 use wasmtime::*;
 
-use super::{JumpTable, JumpTableBuilder, MemoryExt, SdkState};
+use super::{JumpTableBuilder, MemoryExt, SdkState};
 
 // MARK: Jump Table
 

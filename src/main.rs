@@ -2,20 +2,10 @@
 
 // You can execute this example with `cargo run --example linking`
 
-use std::ffi::CStr;
-use std::fs::File;
-use std::io::BufWriter;
-use std::time::Instant;
+use piet::TextLayout;
 
-use anyhow::Context;
-use piet::{
-    kurbo::{Circle, Rect},
-    Color, FontFamily, ImageFormat, RenderContext, Text, TextAttribute, TextLayout,
-    TextLayoutBuilder,
-};
-use piet_common::kurbo::{Point, Size};
-use piet_common::{BitmapTarget, Device};
-use png::{ColorType, Encoder};
+use piet_common::Device;
+
 use wasmtime::*;
 
 use crate::sdk::{JumpTable, SdkState};
@@ -35,7 +25,7 @@ fn main() -> Result<()> {
     )?;
     println!("Booting...");
     let mut renderer = Device::new().unwrap();
-    let mut state = SdkState::new(&mut renderer);
+    let state = SdkState::new(&mut renderer);
     let mut store = Store::new(&engine, state);
     let imports = module
         .imports()

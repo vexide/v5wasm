@@ -1,20 +1,10 @@
-use std::{
-    collections::HashMap,
-    ffi::CStr,
-    ops::{Index, IndexMut},
-    time::Instant,
-};
+use std::{collections::HashMap, ffi::CStr, time::Instant};
 
-use anyhow::Context;
-use piet_common::{
-    kurbo::{Point, Size},
-    Piet,
-};
-use piet_common::{BitmapTarget, Device};
-use png::{ColorType, Encoder};
+use piet_common::Device;
+
 use wasmtime::*;
 
-use self::display::{build_display_jump_table, ColorExt, Display, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+use self::display::{build_display_jump_table, Display, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 
 mod display;
 
