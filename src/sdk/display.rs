@@ -112,7 +112,9 @@ impl<'a> Display<'a> {
             mono_font: {
                 let mut rc = bitmap.render_context();
                 let noto_sans_mono = include_bytes!("../../fonts/NotoSansMono-Regular.ttf");
-                rc.text().load_font(noto_sans_mono)?
+                let font = rc.text().load_font(noto_sans_mono)?;
+                rc.finish()?;
+                font
             },
             bitmap,
             width,

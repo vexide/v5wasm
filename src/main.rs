@@ -114,10 +114,7 @@ fn main() -> Result<()> {
             .debug_info(true)
             .wasm_backtrace_details(WasmBacktraceDetails::Enable),
     )?;
-    let (module, cold_header) = load_program(
-        &engine,
-        "../vexide-wasm/target/wasm32-unknown-unknown/debug/examples/basic.wasm",
-    )?;
+    let (module, cold_header) = load_program(&engine, "program.wasm")?;
     println!("Booting...");
     let mut renderer = Device::new().unwrap();
 
