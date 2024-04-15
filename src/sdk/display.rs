@@ -14,6 +14,8 @@ use piet_common::{BitmapTarget, Device};
 use png::{ColorType, Encoder};
 use wasmtime::*;
 
+use crate::ProgramOptions;
+
 use super::{read_c_string, JumpTableBuilder, MemoryExt, SdkState};
 
 // MARK: Jump Table
@@ -79,6 +81,7 @@ pub struct Display<'a> {
     mono_font: piet::FontFamily,
     width: usize,
     height: usize,
+    program_options: ProgramOptions,
 }
 
 impl<'a> Deref for Display<'a> {
@@ -96,11 +99,16 @@ impl<'a> DerefMut for Display<'a> {
 }
 
 impl<'a> Display<'a> {
-    pub fn new(width: usize, height: usize, renderer: &'a mut Device) -> Result<Self, piet::Error> {
+    pub fn new(
+        width: usize,
+        height: usize,
+        renderer: &'a mut Device,
+        program_options: ProgramOptions,
+    ) -> Result<Self, piet::Error> {
         let mut bitmap = renderer.bitmap_target(width, height, 1.0)?;
         let mut display = Display {
-            foreground_color: Color::WHITE,
-            background_color: Color::BLACK,
+            foreground_color: program_options.default_fg_color(),
+            background_color: program_options.default_bg_color(),
             mono_font: {
                 let mut rc = bitmap.render_context();
                 let noto_sans_mono = include_bytes!("../../fonts/NotoSansMono-Regular.ttf");
@@ -109,6 +117,7 @@ impl<'a> Display<'a> {
             bitmap,
             width,
             height,
+            program_options,
         };
         display.erase()?;
         Ok(display)
@@ -143,7 +152,7 @@ impl<'a> Display<'a> {
     pub fn erase(&mut self) -> Result<(), piet::Error> {
         let entire_screen = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
         let fg_color = self.foreground_color;
-        self.foreground_color = Color::BLACK;
+        self.foreground_color = self.program_options.default_bg_color();
         self.draw(entire_screen, false)?;
         self.foreground_color = fg_color;
         Ok(())

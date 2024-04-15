@@ -87,6 +87,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
+name = "bytes"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "514de17de45fdb8dc022b1a7975556c53c86f9f0aa5f534b98977b171857c2c9"
+
+[[package]]
 name = "cairo-rs"
 version = "0.16.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -299,7 +305,7 @@ dependencies = [
  "itertools",
  "log",
  "smallvec",
- "wasmparser",
+ "wasmparser 0.201.0",
  "wasmtime-types",
 ]
 
@@ -1327,9 +1333,11 @@ name = "vex-sdk-sim"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "piet",
  "piet-common",
  "png",
+ "wasmparser 0.203.0",
  "wasmtime",
 ]
 
@@ -1408,6 +1416,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmparser"
+version = "0.203.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b473b35fff082e8c8377f4e2c8d48075e562aa051e48a02229bdcafbf349d37"
+dependencies = [
+ "bitflags 2.5.0",
+ "indexmap",
+ "semver",
+]
+
+[[package]]
 name = "wasmtime"
 version = "19.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1432,7 +1451,7 @@ dependencies = [
  "serde_json",
  "target-lexicon",
  "wasm-encoder",
- "wasmparser",
+ "wasmparser 0.201.0",
  "wasmtime-cranelift",
  "wasmtime-environ",
  "wasmtime-jit-icache-coherence",
@@ -1469,7 +1488,7 @@ dependencies = [
  "object",
  "target-lexicon",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.201.0",
  "wasmtime-cranelift-shared",
  "wasmtime-environ",
  "wasmtime-versioned-export-macros",
@@ -1510,7 +1529,7 @@ dependencies = [
  "serde_derive",
  "target-lexicon",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.201.0",
  "wasmtime-types",
 ]
 
@@ -1579,7 +1598,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.201.0",
 ]
 
 [[package]]

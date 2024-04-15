@@ -5,9 +5,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.82"
+bytes = "1.6.0"
 piet = { version = "0.6.2", features = ["png"] }
 piet-common = { version = "0.6.2", features = ["png"] }
 png = "0.17.13"
+wasmparser = "0.203.0"
 wasmtime = { version = "19.0.2", default-features = false, features = [
     # "cache",
     "parallel-compilation",

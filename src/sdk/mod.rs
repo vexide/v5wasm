@@ -4,22 +4,33 @@ use piet_common::Device;
 
 use wasmtime::*;
 
+use crate::ProgramOptions;
+
 use self::display::{build_display_jump_table, Display, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 
 mod display;
 
 pub struct SdkState<'a> {
+    module: Module,
     program_start: Instant,
     display: Display<'a>,
+    program_options: ProgramOptions,
 }
 
 impl<'a> SdkState<'a> {
-    pub fn new(renderer: &'a mut Device) -> Self {
+    pub fn new(module: Module, program_options: ProgramOptions, renderer: &'a mut Device) -> Self {
         SdkState {
+            module,
+            display: Display::new(DISPLAY_WIDTH, DISPLAY_HEIGHT, renderer, program_options)
+                .unwrap(),
+            program_options,
             program_start: Instant::now(),
-            display: Display::new(DISPLAY_WIDTH, DISPLAY_HEIGHT, renderer).unwrap(),
         }
     }
+
+    // fn configure(&mut self) {
+    //     self.module.text()
+    // }
 }
 
 const JUMP_TABLE_START: usize = 0x037FC000;
