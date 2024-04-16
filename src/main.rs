@@ -114,7 +114,7 @@ fn main() -> Result<()> {
             .debug_info(true)
             .wasm_backtrace_details(WasmBacktraceDetails::Enable),
     )?;
-    let (module, cold_header) = load_program(&engine, "program.wasm")?;
+    let (module, cold_header) = load_program(&engine, "program.wasm").unwrap();
     println!("Booting...");
     let mut renderer = Device::new().unwrap();
 

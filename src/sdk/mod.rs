@@ -1,13 +1,19 @@
 use std::{collections::HashMap, ffi::CStr, time::Instant};
 
+use bitflags::bitflags;
 use piet_common::Device;
 
+use sdl2::GameControllerSubsystem;
 use wasmtime::*;
 
 use crate::ProgramOptions;
 
-use self::display::{build_display_jump_table, Display, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+use self::{
+    controller::{build_controller_jump_table, Inputs},
+    display::{build_display_jump_table, Display, DISPLAY_HEIGHT, DISPLAY_WIDTH},
+};
 
+mod controller;
 mod display;
 
 pub struct SdkState<'a> {
@@ -15,22 +21,21 @@ pub struct SdkState<'a> {
     program_start: Instant,
     display: Display<'a>,
     program_options: ProgramOptions,
+    inputs: Inputs,
 }
 
 impl<'a> SdkState<'a> {
     pub fn new(module: Module, program_options: ProgramOptions, renderer: &'a mut Device) -> Self {
+        let sdl = sdl2::init().unwrap();
         SdkState {
             module,
             display: Display::new(DISPLAY_WIDTH, DISPLAY_HEIGHT, renderer, program_options)
                 .unwrap(),
             program_options,
+            inputs: Inputs::new(sdl.game_controller().unwrap()),
             program_start: Instant::now(),
         }
     }
-
-    // fn configure(&mut self) {
-    //     self.module.text()
-    // }
 }
 
 const JUMP_TABLE_START: usize = 0x037FC000;
@@ -67,6 +72,7 @@ impl JumpTable {
         };
 
         build_display_jump_table(memory, &mut builder);
+        build_controller_jump_table(memory, &mut builder);
 
         // vexSerialWriteBuffer
         builder.insert(
@@ -101,6 +107,27 @@ impl JumpTable {
         builder.insert(0x130, move || {
             std::process::exit(0);
         });
+
+        bitflags! {
+            /// The status bits returned by [`vex_sdk::vexCompetitionStatus`].
+            #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+            struct CompetitionStatus: u32 {
+                /// Robot is disabled by field control.
+                const DISABLED = 1 << 0;
+
+                /// Robot is in autonomous mode.
+                const AUTONOMOUS = 1 << 1;
+
+                /// Robot is connected to competition control (either competition switch or field control).
+                const CONNECTED = 1 << 2;
+
+                /// Robot is connected to field control (NOT competition switch)
+                const SYSTEM = 1 << 3;
+            }
+        }
+
+        // vexCompetitionStatus
+        builder.insert(0x9d8, move || -> u32 { CompetitionStatus::empty().bits() });
 
         builder.jump_table
     }
