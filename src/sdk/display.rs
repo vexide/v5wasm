@@ -7,10 +7,10 @@ use std::{
 use anyhow::Context;
 use piet::{
     kurbo::{Circle, Rect, Shape},
-    Color, ImageFormat, RenderContext, Text, TextLayout, TextLayoutBuilder,
+    Color, FontFamily, ImageFormat, RenderContext, Text, TextLayout, TextLayoutBuilder,
 };
-use piet_common::PietTextLayout;
 use piet_common::{BitmapTarget, Device};
+use piet_common::{Piet, PietTextLayout};
 use png::{ColorType, Encoder};
 use wasmtime::*;
 
@@ -111,10 +111,9 @@ impl<'a> Display<'a> {
             background_color: program_options.default_bg_color(),
             mono_font: {
                 let mut rc = bitmap.render_context();
-                let noto_sans_mono = include_bytes!("../../fonts/NotoSansMono-Regular.ttf");
-                let font = rc.text().load_font(noto_sans_mono)?;
+                let mono_font = Display::load_font(&mut rc)?;
                 rc.finish()?;
-                font
+                mono_font
             },
             bitmap,
             width,
@@ -123,6 +122,11 @@ impl<'a> Display<'a> {
         };
         display.erase()?;
         Ok(display)
+    }
+
+    fn load_font(rc: &mut Piet) -> Result<FontFamily, piet::Error> {
+        let noto_sans_mono = include_bytes!("../../fonts/NotoSansMono-Regular.ttf");
+        rc.text().load_font(noto_sans_mono)
     }
 
     fn draw_header(&mut self) -> Result<(), piet::Error> {
@@ -195,9 +199,16 @@ impl<'a> Display<'a> {
         let text = text.replace('\n', ".");
         let fg = self.foreground_color;
         let bg = self.background_color;
+
+        #[cfg(not(target_os = "windows"))]
         let font = self.mono_font.clone();
         {
             let mut rc = self.render_context();
+            // apparently you need to load the font every time on Windows,
+            // this obviously isn't good for performance but is there really an alternative?
+            // might come back to this later
+            #[cfg(target_os = "windows")]
+            let font = Display::load_font(&mut rc)?;
             let text_layout = rc
                 .text()
                 .new_text_layout(text)
