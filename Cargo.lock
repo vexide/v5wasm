@@ -802,6 +802,7 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 [[package]]
 name = "piet"
 version = "0.6.2"
+source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
 dependencies = [
  "kurbo",
  "png",
@@ -811,6 +812,7 @@ dependencies = [
 [[package]]
 name = "piet-cairo"
 version = "0.6.2"
+source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
 dependencies = [
  "cairo-rs",
  "pango",
@@ -823,6 +825,7 @@ dependencies = [
 [[package]]
 name = "piet-common"
 version = "0.6.2"
+source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
 dependencies = [
  "cairo-rs",
  "cairo-sys-rs",
@@ -841,6 +844,7 @@ dependencies = [
 [[package]]
 name = "piet-coregraphics"
 version = "0.6.2"
+source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
 dependencies = [
  "associative-cache",
  "core-foundation",
@@ -854,6 +858,7 @@ dependencies = [
 [[package]]
 name = "piet-direct2d"
 version = "0.6.2"
+source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
 dependencies = [
  "associative-cache",
  "dwrote",
@@ -866,6 +871,7 @@ dependencies = [
 [[package]]
 name = "piet-web"
 version = "0.6.2"
+source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
 dependencies = [
  "js-sys",
  "piet",
@@ -1307,7 +1313,7 @@ dependencies = [
  "piet-common",
  "png",
  "sdl2",
- "wasmparser 0.203.0",
+ "wasmparser 0.204.0",
  "wasmtime",
 ]
 
@@ -1387,9 +1393,9 @@ dependencies = [
 
 [[package]]
 name = "wasmparser"
-version = "0.203.0"
+version = "0.204.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b473b35fff082e8c8377f4e2c8d48075e562aa051e48a02229bdcafbf349d37"
+checksum = "1239d539d9b92489cf729d40df694a62b09f5159f2ab058f4de15d4f820d6585"
 dependencies = [
  "bitflags 2.5.0",
  "indexmap",
