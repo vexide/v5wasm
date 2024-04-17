@@ -1,7 +1,3 @@
-//! Example of instantiating two modules which link to each other.
-
-// You can execute this example with `cargo run --example linking`
-
 use std::io::Cursor;
 
 use anyhow::Context;
@@ -19,23 +15,12 @@ mod sdk;
 
 const HEADER_MAGIC: &[u8] = b"XVX5";
 
-// #define V5_SIG_MAGIC            0x35585658  //XVX5
-// #define IQ_SIG_MAGIC            0x32515658  //XVQ2
-// #define EX_SIG_MAGIC            0x45585658  //XVXE
-// #define V5_SIG_TYPE_USER        0
-// #define V5_SIG_OWNER_SYS        0
-// #define V5_SIG_OWNER_VEX        1
-// #define V5_SIG_OWNER_PARTNER    2
-// #define V5_SIG_OPTIONS_NONE     0
-// #define V5_SIG_OPTIONS_INDG     (1 << 0)   // Invert default graphics colors
-// #define V5_SIG_OPTIONS_EXIT     (1 << 1)   // Kill threads when main exits
-// #define V5_SIG_OPTIONS_THDG     (1 << 2)   // Invert graphics based on theme
+// const PROGRAM_TYPE_USER: u32 = 0;
+// const PROGRAM_OWNER_SYS: u32 = 0;
+// const PROGRAM_OWNER_VEX: u32 = 1;
+// const PROGRAM_OWNER_PARTNER: u32 = 2;
 
-const PROGRAM_TYPE_USER: u32 = 0;
-const PROGRAM_OWNER_SYS: u32 = 0;
-const PROGRAM_OWNER_VEX: u32 = 1;
-const PROGRAM_OWNER_PARTNER: u32 = 2;
-
+/// Options parsed from the program's code signature/cold header.
 #[derive(Debug, Clone, Copy)]
 pub struct ProgramOptions {
     /// The program type. PROS sets this to 0.
@@ -65,6 +50,7 @@ impl ProgramOptions {
     }
 }
 
+/// Loads a user program from a file, parsing the cold header and creating a module.
 fn load_program(engine: &Engine, path: &str) -> Result<(Module, ProgramOptions)> {
     const PROGRAM_OPTIONS_INVERT_DEFAULT_GRAPHICS_COLORS: u32 = 1 << 0;
     const PROGRAM_OPTIONS_KILL_THREADS_WHEN_MAIN_EXITS: u32 = 1 << 1;
@@ -72,6 +58,7 @@ fn load_program(engine: &Engine, path: &str) -> Result<(Module, ProgramOptions)>
 
     let program = std::fs::read(path)?;
 
+    // in Vexide programs the cold header is stored in a section called ".cold_magic"
     let mut cold_header = None;
     let parser = Parser::new(0);
     for payload in parser.parse_all(&program) {
@@ -86,10 +73,14 @@ fn load_program(engine: &Engine, path: &str) -> Result<(Module, ProgramOptions)>
     let mut cold_header = cold_header
         .context("No cold header found in the program")
         .unwrap();
+
+    // copy_to_bytes is used to remove the magic number from the start of the buffer
     let magic = cold_header.copy_to_bytes(HEADER_MAGIC.len());
     if magic != HEADER_MAGIC {
         return Err(anyhow::anyhow!("Invalid magic number"));
     }
+
+    // Parse the rest of the options, these are all the ones found in the public SDK
     let program_type = cold_header.get_u32_le();
     let owner = cold_header.get_u32_le();
     let options = cold_header.get_u32_le();
@@ -103,6 +94,7 @@ fn load_program(engine: &Engine, path: &str) -> Result<(Module, ProgramOptions)>
             != 0,
     };
 
+    // this operation will do a lot of JIT compilation so it's probably the slowest part of the program
     let module = Module::from_binary(engine, &program)?;
     Ok((module, cold_header))
 }
@@ -115,13 +107,18 @@ fn main() -> Result<()> {
             .wasm_backtrace_details(WasmBacktraceDetails::Enable),
     )?;
     let (module, cold_header) = load_program(&engine, "program.wasm").unwrap();
+
     println!("Booting...");
     let mut renderer = Device::new().unwrap();
 
     let state = SdkState::new(module.clone(), cold_header, &mut renderer);
 
     let mut store = Store::new(&engine, state);
-    let imports = module
+
+    // Here we get the metadata of the imported indirect function table.
+    // User programs will request a varying starting number of entries.
+    // If the starting number of entries actually given to the program is too low, it will not start successfully.
+    let imported_table_ty = module
         .imports()
         .filter_map(|i| match i.ty() {
             ExternType::Table(table_ty) => Some(table_ty),
@@ -133,7 +130,7 @@ fn main() -> Result<()> {
     // First set up our linker which is going to be linking modules together. We
     // want our linker to have wasi available, so we set that up here as well.
     let mut linker = Linker::new(&engine);
-    let table = Table::new(&mut store, imports, Ref::Func(None))?;
+    let table = Table::new(&mut store, imported_table_ty, Ref::Func(None))?;
     linker.define(&store, "env", "__indirect_function_table", table)?;
     linker.func_wrap(
         "env",
@@ -149,17 +146,20 @@ fn main() -> Result<()> {
 
     let instance = linker.instantiate(&mut store, &module)?;
 
+    // Allocate space for the jump table. 0x700 total pages covers the entire range of the jump table.
     let memory = instance.get_memory(&mut store, "memory").unwrap();
-
     let target_pages = 0x700;
     let memory_size = memory.size(&store);
     memory.grow(&mut store, target_pages - memory_size)?;
 
+    // Add the jump table to memory and create the WASM FFI interface.
     let sdk = JumpTable::new(&mut store, memory);
     sdk.expose(&mut store, &table, &memory)?;
 
+    // We should be ready to actually run the entrypoint now.
     println!("_entry()");
     let run = instance.get_typed_func::<(), ()>(&mut store, "_entry")?;
     run.call(&mut store, ())?;
+
     Ok(())
 }

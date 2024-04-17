@@ -16,6 +16,7 @@ use self::{
 mod controller;
 mod display;
 
+/// The state of the SDK, containing the program's WASM module, the robot display, and other peripherals.
 pub struct SdkState<'a> {
     module: Module,
     program_start: Instant,
@@ -40,6 +41,7 @@ impl<'a> SdkState<'a> {
 
 const JUMP_TABLE_START: usize = 0x037FC000;
 
+/// Wrapper for the jump table which allows for easily adding new functions to it.
 pub struct JumpTableBuilder<'a, 'b> {
     store: &'a mut Store<SdkState<'b>>,
     jump_table: JumpTable,
@@ -57,12 +59,17 @@ impl<'a, 'b> JumpTableBuilder<'a, 'b> {
     }
 }
 
+/// A set of function pointers in memory which can be called by the WebAssembly module to perform SDK operations.
+///
+/// Addresses are the same as in the real VEX SDK and the `vex-sdk` rust crate.
 pub struct JumpTable {
     api: HashMap<usize, Func>,
 }
 
 impl JumpTable {
-    /// Creates a new jump table using the given memory, and populates it with the default API.
+    /// Creates a new jump table which will use the given memory, and populates it with the default API.
+    ///
+    /// No changes are actually to the user program made apart from creating the resources for the jump table.
     pub fn new(store: &mut Store<SdkState>, memory: Memory) -> Self {
         let mut builder = JumpTableBuilder {
             store,
@@ -133,13 +140,19 @@ impl JumpTable {
     }
 
     /// Applies the memory and table changes required to expose the jump table to the WebAssembly module.
+    ///
+    /// The memory must be big enough to hold the jump table. The indirect function table will be expanded with
+    /// enough new slots to hold all the functions in the jump table.
     pub fn expose(self, store: &mut Store<SdkState>, table: &Table, memory: &Memory) -> Result<()> {
         let sdk_base = table.size(&mut *store);
         let api_size = self.api.len() as u32;
         table.grow(&mut *store, api_size, Ref::Func(None))?;
+
         for (offset, (address, method)) in self.api.into_iter().enumerate() {
             let sdk_index = sdk_base + (offset as u32);
+            // Expose the function to the WASM module. The index of the function in the indirect function table is not constant.
             table.set(&mut *store, sdk_index, Ref::Func(Some(method)))?;
+            // Write the index of the function to a constant location in the jump table memory.
             memory.write(
                 &mut *store,
                 JUMP_TABLE_START + address,
@@ -152,6 +165,10 @@ impl JumpTable {
 }
 
 trait MemoryExt {
+    /// Utility method for reading a C-style string from this memory. Handles converting the bytes to a UTF-8 string.
+    ///
+    /// The string is guaranteed to exist for its entire lifetime, but because it is borrowed, it isn't possible for
+    /// API consumers to call back into WASM code while holding it.
     fn read_c_string<'a>(&self, store: &'a impl AsContext, offset: usize) -> Option<&'a str>;
 }
 
@@ -163,7 +180,8 @@ impl MemoryExt for Memory {
     }
 }
 
-macro_rules! read_c_string {
+/// Utility macro for cloning a C-style string into simulator memory, returning a Result.
+macro_rules! clone_c_string {
     ($addr:expr, from $caller:ident using $memory:ident) => {
         $memory
             .read_c_string(&mut $caller, $addr)
@@ -171,4 +189,4 @@ macro_rules! read_c_string {
             .map(|s| s.to_string())
     };
 }
-pub(crate) use read_c_string;
+pub(crate) use clone_c_string;

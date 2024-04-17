@@ -11,6 +11,7 @@ use super::JumpTableBuilder;
 
 // MARK: Constants
 
+/// `vex-sdk` excerpt.
 mod constants {
     #![allow(non_camel_case_types)]
     #![allow(non_upper_case_globals)]
@@ -168,6 +169,7 @@ pub struct Inputs {
     states: [ControllerState; 2],
     subsystem: GameControllerSubsystem,
     event_pump: EventPump,
+    /// The connected game controllers in the order `[Primary, Secondary]`.
     game_controllers: [Option<GameController>; 2],
 }
 
@@ -181,6 +183,9 @@ impl Inputs {
         }
     }
 
+    /// Returns whether the controller with the given id is connected.
+    ///
+    /// Fails if the id is invalid.
     pub fn connected(&mut self, id: u32) -> Result<bool> {
         if id >= self.game_controllers.len() as u32 {
             anyhow::bail!("Invalid controller id")
@@ -189,6 +194,7 @@ impl Inputs {
         Ok(self.controller(id as usize).is_some())
     }
 
+    /// Find a suitable game controller for the given index.
     fn find_suitable_controller_id(&self, mut id: usize) -> Option<GameController> {
         for index in 0..self.subsystem.num_joysticks().ok()? {
             if self.subsystem.is_game_controller(index) {
@@ -198,7 +204,7 @@ impl Inputs {
                 if !controller.attached() {
                     continue;
                 }
-                if index == 0 {
+                if id == 0 {
                     return Some(controller);
                 } else {
                     id -= 1;
@@ -208,6 +214,7 @@ impl Inputs {
         None
     }
 
+    /// Get the connected controller for the given index, or try to connect a new one if it is not connected.
     fn controller(&mut self, index: usize) -> Option<(&mut GameController, &mut ControllerState)> {
         if self.game_controllers[index]
             .as_ref()
@@ -221,6 +228,7 @@ impl Inputs {
             .map(|c| (c, &mut self.states[index]))
     }
 
+    /// Get new events from the SDL event pump and update the SDK's representation of the controller states.
     pub fn update(&mut self) {
         self.event_pump.pump_events();
 

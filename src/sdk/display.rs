@@ -16,7 +16,7 @@ use wasmtime::*;
 
 use crate::ProgramOptions;
 
-use super::{read_c_string, JumpTableBuilder, MemoryExt, SdkState};
+use super::{clone_c_string, JumpTableBuilder, MemoryExt, SdkState};
 
 // MARK: Jump Table
 
@@ -57,7 +57,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               format_ptr: u32,
               _args: u32|
               -> Result<()> {
-            let format = read_c_string!(format_ptr as usize, from caller using memory)?;
+            let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
             caller
                 .data_mut()
                 .display
@@ -110,6 +110,7 @@ impl<'a> Display<'a> {
             foreground_color: program_options.default_fg_color(),
             background_color: program_options.default_bg_color(),
             mono_font: {
+                // For some reason you need to create a render context to load the font.
                 let mut rc = bitmap.render_context();
                 let mono_font = Display::load_font(&mut rc)?;
                 rc.finish()?;
@@ -120,15 +121,18 @@ impl<'a> Display<'a> {
             height,
             program_options,
         };
-        display.erase()?;
+
+        display.erase()?; // The bitmap is transparent by default, erase it to make it black.
         Ok(display)
     }
 
+    /// Returns the bundled monospace font.
     fn load_font(rc: &mut Piet) -> Result<FontFamily, piet::Error> {
         let noto_sans_mono = include_bytes!("../../fonts/NotoSansMono-Regular.ttf");
         rc.text().load_font(noto_sans_mono)
     }
 
+    /// Draws the blue program header at the top of the display.
     fn draw_header(&mut self) -> Result<(), piet::Error> {
         const HEADER_BG: Color = Color::rgb8(0x01, 0x99, 0xCC);
         let width = self.width as f64;
@@ -138,6 +142,7 @@ impl<'a> Display<'a> {
         Ok(())
     }
 
+    /// Saves the display to a PNG file.
     pub fn render(&mut self) -> Result<(), piet::Error> {
         self.draw_header()?;
         let mut data = vec![0; DISPLAY_HEIGHT * DISPLAY_WIDTH * 4];
@@ -155,6 +160,7 @@ impl<'a> Display<'a> {
         Ok(())
     }
 
+    /// Erases the display by filling it with the background color.
     pub fn erase(&mut self) -> Result<(), piet::Error> {
         let entire_screen = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
         let fg_color = self.foreground_color;
@@ -164,6 +170,7 @@ impl<'a> Display<'a> {
         Ok(())
     }
 
+    /// Draws or strokes a shape on the display, in the foreground color.
     pub fn draw(&mut self, shape: impl Shape, stroke: bool) -> Result<(), piet::Error> {
         let fg = self.foreground_color;
         {
@@ -179,6 +186,7 @@ impl<'a> Display<'a> {
         Ok(())
     }
 
+    /// Calculates the shape of the area behind a text layout, so that it can be drawn on top of a background color.
     fn calculate_text_background(text_layout: &PietTextLayout, y_coord: f64) -> Rect {
         const LINE_HEIGHT_OFFSET: f64 = -2.0;
         let size = text_layout.size();
@@ -190,6 +198,11 @@ impl<'a> Display<'a> {
         )
     }
 
+    /// Writes text to the display at a given line number.
+    ///
+    /// # Arguments
+    ///
+    /// * `opaque`: Whether the text should be drawn on top of a background color.
     pub fn write_text(
         &mut self,
         text: String,
