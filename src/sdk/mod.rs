@@ -54,6 +54,11 @@ impl<'a, 'b> JumpTableBuilder<'a, 'b> {
         address: usize,
         func: impl IntoFunc<SdkState<'b>, Params, Results>,
     ) {
+        debug_assert!(
+            !self.jump_table.api.contains_key(&address),
+            "Duplicate jump table function at address {:#x}",
+            address
+        );
         let func = Func::wrap(&mut self.store, func);
         self.jump_table.api.insert(address, func);
     }

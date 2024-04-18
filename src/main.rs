@@ -137,7 +137,7 @@ fn main() -> Result<()> {
         "sim_log_backtrace",
         |caller: Caller<'_, SdkState>| {
             let backtrace = WasmBacktrace::capture(caller);
-            println!("backtrace: {:?}", backtrace);
+            println!("{}", backtrace);
             Ok(())
         },
     )?;
