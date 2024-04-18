@@ -396,9 +396,10 @@ impl<'a> Display<'a> {
         text: &str,
         font_size: FontType,
     ) -> Result<Size, piet::Error> {
-        self.with_text_layout(text, font_size, |_, layout| {
+        self.with_text_layout(text, font_size, |mut rc, layout| {
             let mut size = layout.build()?.size();
             size.height = font_size.line_height();
+            rc.finish()?;
             Ok(size)
         })
     }
