@@ -7,8 +7,8 @@ use std::{
 use anyhow::Context;
 use piet::{
     kurbo::{Circle, Rect, Shape, Size},
-    Color, FontFamily, ImageFormat, RenderContext, Text, TextLayout, TextLayoutBuilder,
-    TextStorage,
+    Color, FontFamily, ImageBuf, ImageFormat, InterpolationMode, RenderContext, Text, TextLayout,
+    TextLayoutBuilder, TextStorage,
 };
 use piet_common::{BitmapTarget, Device, PietTextLayoutBuilder};
 use piet_common::{Piet, PietTextLayout};
@@ -174,6 +174,33 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
             Ok(())
         },
     );
+
+    // vexDisplayCopyRect
+    builder.insert(
+        0x654,
+        move |mut caller: Caller<'_, SdkState>,
+              x1: i32,
+              y1: i32,
+              x2: i32,
+              y2: i32,
+              buffer_ptr: u32,
+              stride: u32|
+              -> Result<()> {
+            let buffer_len = (x2 - x1) as usize * (y2 - y1) as usize * 4;
+            let buffer = memory.data(&mut caller)[buffer_ptr as usize..][..buffer_len].to_vec();
+            caller
+                .data_mut()
+                .display
+                .draw_buffer(
+                    &buffer,
+                    (x1 as usize, y1 as usize),
+                    (x2 as usize, y2 as usize),
+                    stride as usize,
+                )
+                .unwrap();
+            Ok(())
+        },
+    );
 }
 
 // MARK: API
@@ -240,6 +267,32 @@ impl<'a> Display<'a> {
     fn load_font(rc: &mut Piet) -> Result<FontFamily, piet::Error> {
         let noto_sans_mono = include_bytes!("../../fonts/NotoSansMono-Regular.ttf");
         rc.text().load_font(noto_sans_mono)
+    }
+
+    fn draw_buffer(
+        &mut self,
+        buf: &[u8],
+        top_left: (usize, usize),
+        bot_right: (usize, usize),
+        stride: usize,
+    ) -> Result<(), piet::Error> {
+        let mut rc = self.render_context();
+        let img_width = bot_right.0 - top_left.0;
+        let img_height = bot_right.1 - top_left.1;
+        let bitmap =
+            rc.make_image_with_stride(img_width, img_height, stride, buf, ImageFormat::Rgb)?;
+        rc.draw_image(
+            &bitmap,
+            Rect::new(
+                top_left.0 as f64,
+                top_left.1 as f64,
+                bot_right.0 as f64,
+                bot_right.1 as f64,
+            ),
+            InterpolationMode::Bilinear,
+        );
+        rc.finish()?;
+        Ok(())
     }
 
     /// Draws the blue program header at the top of the display.
