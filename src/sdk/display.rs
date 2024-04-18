@@ -36,7 +36,6 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x668,
         move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
-            println!("vexDisplayRectDraw({}, {}, {}, {})", x1, y1, x2, y2);
             let rect = Rect::new(x1 as f64, y1 as f64, x2 as f64, y2 as f64);
             caller.data_mut().display.draw(rect, true).unwrap();
         },
@@ -73,14 +72,12 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x6c0,
         move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
-            println!("String width get");
             let string = clone_c_string!(string_ptr as usize, from caller using memory)?;
             let size = caller
                 .data_mut()
                 .display
                 .calculate_string_size(&string, FontType::Normal)
                 .unwrap();
-            println!("width: {}", size.width as u32);
             Ok(size.width as u32)
         },
     );
