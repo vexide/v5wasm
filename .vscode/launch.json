@@ -13,10 +13,12 @@
                     "build",
                     "--bin=vex-sdk-sim",
                     "--package=vex-sdk-sim",
+                    "-r",
+                    "--color=always",
                 ],
                 "filter": {
                     "name": "vex-sdk-sim",
-                    "kind": "bin"
+                    "kind": "bin",
                 }
             },
             "args": [],

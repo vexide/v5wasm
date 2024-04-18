@@ -259,7 +259,7 @@ impl<'a> Display<'a> {
     pub fn render(&mut self, explicitly_requested: bool) -> Result<(), piet::Error> {
         if explicitly_requested {
             self.render_mode = RenderMode::DoubleBuffered;
-        } else if self.render_mode == RenderMode::Immediate {
+        } else if self.render_mode == RenderMode::DoubleBuffered {
             return Ok(());
         }
 

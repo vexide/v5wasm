@@ -9,10 +9,10 @@ bitflags = "2.5.0"
 bytes = "1.6.0"
 piet = { version = "0.6.2", features = [
     "png",
-], git = "https://github.com/doinkythederp/piet.git" }
+], git = "https://github.com/doinkythederp/piet.git", branch = "fix/draw-after-copy" }
 piet-common = { version = "0.6.2", features = [
     "png",
-], git = "https://github.com/doinkythederp/piet.git" }
+], git = "https://github.com/doinkythederp/piet.git", branch = "fix/draw-after-copy" }
 png = "0.17.13"
 sdl2 = "0.36.0"
 wasmparser = "0.204.0"

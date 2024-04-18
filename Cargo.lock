@@ -802,7 +802,7 @@ checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 [[package]]
 name = "piet"
 version = "0.6.2"
-source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
+source = "git+https://github.com/doinkythederp/piet.git?branch=fix/draw-after-copy#e69bc46ff3dea0cf38fa9cf943d2499bf76cab46"
 dependencies = [
  "kurbo",
  "png",
@@ -812,7 +812,7 @@ dependencies = [
 [[package]]
 name = "piet-cairo"
 version = "0.6.2"
-source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
+source = "git+https://github.com/doinkythederp/piet.git?branch=fix/draw-after-copy#e69bc46ff3dea0cf38fa9cf943d2499bf76cab46"
 dependencies = [
  "cairo-rs",
  "pango",
@@ -825,7 +825,7 @@ dependencies = [
 [[package]]
 name = "piet-common"
 version = "0.6.2"
-source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
+source = "git+https://github.com/doinkythederp/piet.git?branch=fix/draw-after-copy#e69bc46ff3dea0cf38fa9cf943d2499bf76cab46"
 dependencies = [
  "cairo-rs",
  "cairo-sys-rs",
@@ -844,7 +844,7 @@ dependencies = [
 [[package]]
 name = "piet-coregraphics"
 version = "0.6.2"
-source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
+source = "git+https://github.com/doinkythederp/piet.git?branch=fix/draw-after-copy#e69bc46ff3dea0cf38fa9cf943d2499bf76cab46"
 dependencies = [
  "associative-cache",
  "core-foundation",
@@ -858,7 +858,7 @@ dependencies = [
 [[package]]
 name = "piet-direct2d"
 version = "0.6.2"
-source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
+source = "git+https://github.com/doinkythederp/piet.git?branch=fix/draw-after-copy#e69bc46ff3dea0cf38fa9cf943d2499bf76cab46"
 dependencies = [
  "associative-cache",
  "dwrote",
@@ -871,7 +871,7 @@ dependencies = [
 [[package]]
 name = "piet-web"
 version = "0.6.2"
-source = "git+https://github.com/doinkythederp/piet.git#3ba697065a1213f6c2a711ad193f0ed390d31ef8"
+source = "git+https://github.com/doinkythederp/piet.git?branch=fix/draw-after-copy#e69bc46ff3dea0cf38fa9cf943d2499bf76cab46"
 dependencies = [
  "js-sys",
  "piet",
