@@ -265,7 +265,7 @@ impl<'a> Display<'a> {
 
     /// Returns the bundled monospace font.
     fn load_font(rc: &mut Piet) -> Result<FontFamily, piet::Error> {
-        let noto_sans_mono = include_bytes!("../../fonts/NotoSansMono-Regular.ttf");
+        let noto_sans_mono = include_bytes!("../../fonts/NotoMono-Regular.ttf");
         rc.text().load_font(noto_sans_mono)
     }
 
@@ -289,7 +289,7 @@ impl<'a> Display<'a> {
                 bot_right.0 as f64,
                 bot_right.1 as f64,
             ),
-            InterpolationMode::Bilinear,
+            InterpolationMode::NearestNeighbor,
         );
         rc.finish()?;
         Ok(())
