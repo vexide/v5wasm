@@ -5,14 +5,10 @@ use std::{
 };
 
 use anyhow::Context;
-use piet::{
-    kurbo::{Circle, Rect, Shape, Size},
-    Color, FontFamily, ImageBuf, ImageFormat, InterpolationMode, RenderContext, Text, TextLayout,
-    TextLayoutBuilder, TextStorage,
-};
-use piet_common::{BitmapTarget, Device, PietTextLayoutBuilder};
-use piet_common::{Piet, PietTextLayout};
+use fimg::{pixels::convert::RGB, Image};
+use fontdue::Font;
 use png::{ColorType, Encoder};
+use resource::{resource, Resource};
 use wasmtime::*;
 
 use crate::ProgramOptions;
@@ -24,20 +20,22 @@ use super::{clone_c_string, JumpTableBuilder, MemoryExt, SdkState};
 pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) {
     // vexDisplayForegroundColor
     builder.insert(0x640, move |mut caller: Caller<'_, SdkState>, col: u32| {
-        caller.data_mut().display.foreground_color = Color::from_rgb_u32(col);
+        caller.data_mut().display.foreground_color = RGB::from_u32(col);
     });
 
     // vexDisplayBackgroundColor
     builder.insert(0x644, move |mut caller: Caller<'_, SdkState>, col: u32| {
-        caller.data_mut().display.background_color = Color::from_rgb_u32(col);
+        caller.data_mut().display.background_color = RGB::from_u32(col);
     });
 
     // vexDisplayRectDraw
     builder.insert(
         0x668,
         move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
-            let rect = Rect::new(x1 as f64, y1 as f64, x2 as f64, y2 as f64);
-            caller.data_mut().display.draw(rect, true).unwrap();
+            caller
+                .data_mut()
+                .display
+                .draw(Path::Rect { x1, y1, x2, y2 }, true);
         },
     );
 
@@ -45,31 +43,37 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x670,
         move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
-            let rect = Rect::new(x1 as f64, y1 as f64, x2 as f64, y2 as f64);
-            caller.data_mut().display.draw(rect, false).unwrap();
+            caller
+                .data_mut()
+                .display
+                .draw(Path::Rect { x1, y1, x2, y2 }, false);
         },
     );
 
     // vexDisplayCircleDraw
     builder.insert(
         0x674,
-        move |mut caller: Caller<'_, SdkState>, xc: i32, yc: i32, radius: i32| {
-            let circle = Circle::new((xc as f64, yc as f64), radius as f64);
-            caller.data_mut().display.draw(circle, true).unwrap();
+        move |mut caller: Caller<'_, SdkState>, cx: i32, cy: i32, radius: i32| {
+            caller
+                .data_mut()
+                .display
+                .draw(Path::Circle { cx, cy, radius }, true);
         },
     );
 
     // vexDisplayCircleFill
     builder.insert(
         0x67c,
-        move |mut caller: Caller<'_, SdkState>, xc: i32, yc: i32, radius: i32| {
-            let circle = Circle::new((xc as f64, yc as f64), radius as f64);
-            caller.data_mut().display.draw(circle, false).unwrap();
+        move |mut caller: Caller<'_, SdkState>, cx: i32, cy: i32, radius: i32| {
+            caller
+                .data_mut()
+                .display
+                .draw(Path::Circle { cx, cy, radius }, false);
         },
     );
 
     // vexDisplayStringWidthGet
-    builder.insert(
+    /*builder.insert(
         0x6c0,
         move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
             let string = clone_c_string!(string_ptr as usize, from caller using memory)?;
@@ -85,13 +89,13 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     // vexDisplayStringHeightGet
     builder.insert(0x6c4, move |_string_ptr: i32| {
         Ok(FontType::Normal.line_height() as u32)
-    });
+    });*/
 
     // vexDisplayRender
     builder.insert(
         0x7a0,
         move |mut caller: Caller<'_, SdkState>, _vsync_wait: i32, _run_scheduler: i32| {
-            caller.data_mut().display.render(true).unwrap();
+            caller.data_mut().display.render(true);
         },
     );
 
@@ -100,7 +104,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         caller.data_mut().display.disable_double_buffer();
     });
 
-    // vexDisplayVPrintf
+    /*// vexDisplayVPrintf
     builder.insert(
         0x680,
         move |mut caller: Caller<'_, SdkState>,
@@ -200,73 +204,92 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                 .unwrap();
             Ok(())
         },
-    );
+    );*/
 }
 
 // MARK: API
 
-pub const DISPLAY_HEIGHT: usize = 272;
-pub const DISPLAY_WIDTH: usize = 480;
-pub const HEADER_HEIGHT: usize = 32;
+pub enum Path {
+    Rect { x1: i32, y1: i32, x2: i32, y2: i32 },
+    Circle { cx: i32, cy: i32, radius: i32 },
+}
 
-pub struct Display<'a> {
-    pub foreground_color: Color,
-    pub background_color: Color,
-    pub bitmap: BitmapTarget<'a>,
-    mono_font: piet::FontFamily,
-    width: usize,
-    height: usize,
+impl Path {
+    fn draw<T: AsMut<[u8]> + AsRef<[u8]>>(
+        &self,
+        canvas: &mut Image<T, 3>,
+        stroke: bool,
+        color: RGB,
+    ) {
+        match self {
+            &Path::Rect { x1, y1, x2, y2 } => {
+                let coords = (x1 as u32, y1 as u32);
+                let width = (x2 - x1) as u32;
+                let height = (y2 - y1) as u32;
+                if stroke {
+                    canvas.r#box(coords, width, height, color);
+                } else {
+                    canvas.filled_box(coords, width, height, color);
+                }
+            }
+            &Path::Circle { cx, cy, radius } => {
+                if stroke {
+                    canvas.border_circle((cx, cy), radius, color);
+                } else {
+                    canvas.circle((cx, cy), radius, color);
+                }
+            }
+        }
+    }
+}
+
+pub const DISPLAY_HEIGHT: u32 = 272;
+pub const DISPLAY_WIDTH: u32 = 480;
+pub const HEADER_HEIGHT: u32 = 32;
+
+pub const BLACK: RGB = [0, 0, 0];
+pub const WHITE: RGB = [255, 255, 255];
+pub const HEADER_BG: RGB = [0x00, 0x99, 0xCC];
+
+pub struct Display {
+    pub foreground_color: RGB,
+    pub background_color: RGB,
+    pub canvas: Image<Box<[u8]>, 3>,
+    mono_font: Resource<[u8]>,
     program_options: ProgramOptions,
     render_mode: RenderMode,
 }
 
-impl<'a> Deref for Display<'a> {
-    type Target = BitmapTarget<'a>;
+impl Deref for Display {
+    type Target = Image<Box<[u8]>, 3>;
 
     fn deref(&self) -> &Self::Target {
-        &self.bitmap
+        &self.canvas
     }
 }
 
-impl<'a> DerefMut for Display<'a> {
+impl DerefMut for Display {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.bitmap
+        &mut self.canvas
     }
 }
 
-impl<'a> Display<'a> {
-    pub fn new(
-        width: usize,
-        height: usize,
-        renderer: &'a mut Device,
-        program_options: ProgramOptions,
-    ) -> Result<Self, piet::Error> {
-        let mut bitmap = renderer.bitmap_target(width, height, 1.0)?;
+impl Display {
+    pub fn new(program_options: ProgramOptions) -> Self {
+        let canvas = fimg::builder::Builder::new(DISPLAY_WIDTH, DISPLAY_HEIGHT)
+            .fill(program_options.default_bg_color());
+
         let mut display = Display {
             foreground_color: program_options.default_fg_color(),
             background_color: program_options.default_bg_color(),
-            mono_font: {
-                // For some reason you need to create a render context to load the font.
-                let mut rc = bitmap.render_context();
-                let mono_font = Display::load_font(&mut rc)?;
-                rc.finish()?;
-                mono_font
-            },
-            bitmap,
-            width,
-            height,
+            mono_font: resource!("/fonts/NotoMono-Regular.ttf"),
+            canvas,
             program_options,
             render_mode: RenderMode::default(),
         };
 
-        display.erase()?; // The bitmap is transparent by default, erase it to make it black.
-        Ok(display)
-    }
-
-    /// Returns the bundled monospace font.
-    fn load_font(rc: &mut Piet) -> Result<FontFamily, piet::Error> {
-        let noto_sans_mono = include_bytes!("../../fonts/NotoMono-Regular.ttf");
-        rc.text().load_font(noto_sans_mono)
+        display.erase(); // The bitmap is transparent by default, erase it to make it black.
+        display
     }
 
     fn draw_buffer(
@@ -275,58 +298,27 @@ impl<'a> Display<'a> {
         top_left: (usize, usize),
         bot_right: (usize, usize),
         stride: usize,
-    ) -> Result<(), piet::Error> {
-        let mut rc = self.render_context();
-        let img_width = bot_right.0 - top_left.0;
-        let img_height = bot_right.1 - top_left.1;
-        let bitmap =
-            rc.make_image_with_stride(img_width, img_height, stride, buf, ImageFormat::Rgb)?;
-        rc.draw_image(
-            &bitmap,
-            Rect::new(
-                top_left.0 as f64,
-                top_left.1 as f64,
-                bot_right.0 as f64,
-                bot_right.1 as f64,
-            ),
-            InterpolationMode::NearestNeighbor,
-        );
-        rc.finish()?;
-        Ok(())
+    ) {
+        todo!()
     }
 
     /// Draws the blue program header at the top of the display.
-    fn draw_header(&mut self) -> Result<(), piet::Error> {
-        const HEADER_BG: Color = Color::rgb8(0x00, 0x99, 0xCC);
-        let width = self.width as f64;
-        let mut rc = self.render_context();
-        rc.fill(Rect::new(0.0, 0.0, width, HEADER_HEIGHT as f64), &HEADER_BG);
-        rc.finish()?;
-        Ok(())
+    fn draw_header(&mut self) {
+        self.filled_box((0, 0), DISPLAY_WIDTH, HEADER_HEIGHT, HEADER_BG);
     }
 
     /// Saves the display to a PNG file.
-    pub fn render(&mut self, explicitly_requested: bool) -> Result<(), piet::Error> {
+    pub fn render(&mut self, explicitly_requested: bool) {
         if explicitly_requested {
             self.render_mode = RenderMode::DoubleBuffered;
         } else if self.render_mode == RenderMode::DoubleBuffered {
-            return Ok(());
+            return;
         }
 
-        self.draw_header()?;
-        let mut data = vec![0; DISPLAY_HEIGHT * DISPLAY_WIDTH * 4];
-        self.copy_raw_pixels(ImageFormat::RgbaPremul, &mut data)?;
-        piet::util::unpremultiply_rgba(&mut data);
-        let file = BufWriter::new(File::create("display.png").map_err(Into::<Box<_>>::into)?);
-        let mut encoder = Encoder::new(file, DISPLAY_WIDTH as u32, DISPLAY_HEIGHT as u32);
-        encoder.set_color(ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder
-            .write_header()
-            .map_err(Into::<Box<_>>::into)?
-            .write_image_data(&data)
-            .map_err(Into::<Box<_>>::into)?;
-        Ok(())
+        self.draw_header();
+        // self.flush();
+
+        self.save("display.png");
     }
 
     pub fn disable_double_buffer(&mut self) {
@@ -334,39 +326,22 @@ impl<'a> Display<'a> {
     }
 
     /// Erases the display by filling it with the background color.
-    pub fn erase(&mut self) -> Result<(), piet::Error> {
-        let entire_screen = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
-        let fg_color = self.foreground_color;
-        self.foreground_color = self.program_options.default_bg_color();
-        self.draw(entire_screen, false)?;
-        self.foreground_color = fg_color;
-        Ok(())
+    pub fn erase(&mut self) {
+        self.canvas.filled_box(
+            (0, 0),
+            DISPLAY_WIDTH,
+            DISPLAY_HEIGHT,
+            self.program_options.default_bg_color(),
+        );
     }
 
     /// Draws or strokes a shape on the display, in the foreground color.
-    pub fn draw(
-        &mut self,
-        mut shape: impl Shape + Strokable,
-        stroke: bool,
-    ) -> Result<(), piet::Error> {
-        if stroke {
-            shape = Strokable::stroking(shape);
-        }
-        let fg = self.foreground_color;
-        {
-            let mut rc = self.render_context();
-            if stroke {
-                rc.stroke(&shape, &fg, 1.0);
-            } else {
-                rc.fill(&shape, &fg);
-            }
-            rc.finish()?;
-        }
-        self.render(false)?;
-        Ok(())
+    pub fn draw(&mut self, mut shape: Path, stroke: bool) {
+        shape.draw(&mut self.canvas, stroke, self.foreground_color);
+        self.render(false);
     }
 
-    /// Calculates the shape of the area behind a text layout, so that it can be drawn on top of a background color.
+    /*/// Calculates the shape of the area behind a text layout, so that it can be drawn on top of a background color.
     fn calculate_text_background(
         text_layout: &PietTextLayout,
         coords: (f64, f64),
@@ -452,23 +427,15 @@ impl<'a> Display<'a> {
             rc.finish()?;
             Ok(size)
         })
-    }
-
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    pub fn height(&self) -> usize {
-        self.height
-    }
+    }*/
 }
 
-pub trait ColorExt {
+pub trait RGBExt {
     /// Creates a `Color` from a 32-bit RGB value.
     ///
     /// ```
-    /// # use piet::Color;
-    /// assert_eq!(Color::from_rgb_u32(0x00FF00), Color::rgb8(0x00, 0xFF, 0x00));
+    /// # use femtovg::Color;
+    /// assert_eq!(Color::rgb_u32(0x00FF00), Color::rgb(0x00, 0xFF, 0x00));
     /// ```
     ///
     /// # Arguments
@@ -478,16 +445,16 @@ pub trait ColorExt {
     /// # Returns
     ///
     /// A `Color` instance representing the specified RGB value.
-    fn from_rgb_u32(rgb: u32) -> Color;
+    fn from_u32(rgb: u32) -> RGB;
 }
 
-impl ColorExt for Color {
-    fn from_rgb_u32(rgb: u32) -> Color {
-        Color::rgb8(
+impl RGBExt for RGB {
+    fn from_u32(rgb: u32) -> RGB {
+        [
             ((rgb >> 16) & 0xFF) as u8,
             ((rgb >> 8) & 0xFF) as u8,
             (rgb & 0xFF) as u8,
-        )
+        ]
     }
 }
 
@@ -548,7 +515,7 @@ pub struct TextOptions {
     pub font_type: FontType,
 }
 
-pub trait Strokable {
+/*pub trait Strokable {
     /// Creates a Rect that can be used to draw the border of `other`.
     fn stroking(other: Self) -> Self;
 }
@@ -568,7 +535,7 @@ impl Strokable for Circle {
         other.radius += 0.5;
         other
     }
-}
+}*/
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum RenderMode {

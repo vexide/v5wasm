@@ -2,10 +2,9 @@ use std::io::Cursor;
 
 use anyhow::Context;
 use bytes::{Buf, Bytes};
-use piet::{Color, TextLayout};
+use fimg::pixels::convert::RGB;
 
-use piet_common::Device;
-
+use sdk::display::{BLACK, WHITE};
 use wasmparser::{Parser, Payload};
 use wasmtime::*;
 
@@ -33,19 +32,19 @@ pub struct ProgramOptions {
 }
 
 impl ProgramOptions {
-    pub const fn default_fg_color(&self) -> Color {
+    pub const fn default_fg_color(&self) -> RGB {
         if self.invert_default_graphics_colors {
-            Color::BLACK
+            BLACK
         } else {
-            Color::WHITE
+            WHITE
         }
     }
 
-    pub const fn default_bg_color(&self) -> Color {
+    pub const fn default_bg_color(&self) -> RGB {
         if self.invert_default_graphics_colors {
-            Color::WHITE
+            WHITE
         } else {
-            Color::BLACK
+            BLACK
         }
     }
 }
@@ -113,9 +112,8 @@ fn main() -> Result<()> {
     let (module, cold_header) = load_program(&engine, "program.wasm").unwrap();
 
     println!("Booting...");
-    let mut renderer = Device::new().unwrap();
 
-    let state = SdkState::new(module.clone(), cold_header, &mut renderer);
+    let state = SdkState::new(module.clone(), cold_header);
 
     let mut store = Store::new(&engine, state);
 

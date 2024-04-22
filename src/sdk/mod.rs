@@ -1,7 +1,6 @@
 use std::{collections::HashMap, ffi::CStr, time::Instant};
 
 use bitflags::bitflags;
-use piet_common::Device;
 
 use sdl2::GameControllerSubsystem;
 use wasmtime::*;
@@ -14,24 +13,23 @@ use self::{
 };
 
 mod controller;
-mod display;
+pub mod display;
 
 /// The state of the SDK, containing the program's WASM module, the robot display, and other peripherals.
-pub struct SdkState<'a> {
+pub struct SdkState {
     module: Module,
     program_start: Instant,
-    display: Display<'a>,
+    display: Display,
     program_options: ProgramOptions,
     inputs: Inputs,
 }
 
-impl<'a> SdkState<'a> {
-    pub fn new(module: Module, program_options: ProgramOptions, renderer: &'a mut Device) -> Self {
+impl SdkState {
+    pub fn new(module: Module, program_options: ProgramOptions) -> Self {
         let sdl = sdl2::init().unwrap();
         SdkState {
             module,
-            display: Display::new(DISPLAY_WIDTH, DISPLAY_HEIGHT, renderer, program_options)
-                .unwrap(),
+            display: Display::new(program_options),
             program_options,
             inputs: Inputs::new(sdl.game_controller().unwrap()),
             program_start: Instant::now(),
@@ -42,17 +40,17 @@ impl<'a> SdkState<'a> {
 const JUMP_TABLE_START: usize = 0x037FC000;
 
 /// Wrapper for the jump table which allows for easily adding new functions to it.
-pub struct JumpTableBuilder<'a, 'b> {
-    store: &'a mut Store<SdkState<'b>>,
+pub struct JumpTableBuilder<'a> {
+    store: &'a mut Store<SdkState>,
     jump_table: JumpTable,
 }
 
-impl<'a, 'b> JumpTableBuilder<'a, 'b> {
+impl<'a> JumpTableBuilder<'a> {
     /// Inserts a function into the jump table at the given address.
     pub fn insert<Params, Results>(
         &mut self,
         address: usize,
-        func: impl IntoFunc<SdkState<'b>, Params, Results>,
+        func: impl IntoFunc<SdkState, Params, Results>,
     ) {
         debug_assert!(
             !self.jump_table.api.contains_key(&address),

@@ -13,7 +13,6 @@
                     "build",
                     "--bin=vex-sdk-sim",
                     "--package=vex-sdk-sim",
-                    "-r",
                     "--color=always",
                 ],
                 "filter": {
