@@ -411,6 +411,8 @@ impl Display {
                 // Draw the glyph into the image per-pixel by using the draw closure
                 glyph.draw(|x, y, alpha| {
                     println!("{alpha}");
+                    let x = x + bounding_box.min.x as u32 + coords.0 as u32;
+                    let y = y + bounding_box.min.y as u32 + coords.1 as u32;
                     if !(x < self.width() && y < self.height()) {
                         println!("Out of bounds: ({x}, {y})");
                         return;
@@ -420,9 +422,7 @@ impl Display {
                         let blended = blend_pixel(old_pixel, fg, alpha);
                         self.set_pixel(
                             // Offset the position by the glyph bounding box
-                            x + bounding_box.min.x as u32 + coords.0 as u32,
-                            y + bounding_box.min.y as u32 + coords.1 as u32,
-                            // Turn the coverage into an alpha value
+                            x, y, // Turn the coverage into an alpha value
                             blended,
                         );
                     }
