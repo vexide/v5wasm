@@ -1,6 +1,4 @@
-use std::{
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 
 use fimg::{pixels::convert::RGB, Image};
 use resource::{resource, Resource};
