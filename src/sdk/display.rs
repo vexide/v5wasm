@@ -98,80 +98,80 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     });
 
     /*// vexDisplayVPrintf
-    builder.insert(
-        0x680,
-        move |mut caller: Caller<'_, SdkState>,
-              x_pos: i32,
-              y_pos: i32,
-              opaque: i32,
-              format_ptr: u32,
-              _args: u32|
-              -> Result<()> {
-            let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            caller
-                .data_mut()
-                .display
-                .write_text(
-                    &format,
-                    (x_pos, y_pos),
-                    TextOptions {
-                        transparent: opaque == 0,
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-            Ok(())
-        },
-    );
+        builder.insert(
+            0x680,
+            move |mut caller: Caller<'_, SdkState>,
+                  x_pos: i32,
+                  y_pos: i32,
+                  opaque: i32,
+                  format_ptr: u32,
+                  _args: u32|
+                  -> Result<()> {
+                let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
+                caller
+                    .data_mut()
+                    .display
+                    .write_text(
+                        &format,
+                        (x_pos, y_pos),
+                        TextOptions {
+                            transparent: opaque == 0,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                Ok(())
+            },
+        );
 
-    // vexDisplayVString
-    builder.insert(
-        0x684,
-        move |mut caller: Caller<'_, SdkState>,
-              line_number: i32,
-              format_ptr: u32,
-              _args: u32|
-              -> Result<()> {
-            let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            caller
-                .data_mut()
-                .display
-                .write_text(
-                    &format,
-                    TextLine(line_number).coords(),
-                    TextOptions::default(),
-                )
-                .unwrap();
-            Ok(())
-        },
-    );
+        // vexDisplayVString
+        builder.insert(
+            0x684,
+            move |mut caller: Caller<'_, SdkState>,
+                  line_number: i32,
+                  format_ptr: u32,
+                  _args: u32|
+                  -> Result<()> {
+                let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
+                caller
+                    .data_mut()
+                    .display
+                    .write_text(
+                        &format,
+                        TextLine(line_number).coords(),
+                        TextOptions::default(),
+                    )
+                    .unwrap();
+                Ok(())
+            },
+        );
 
-    // vexDisplayVSmallStringAt
-    builder.insert(
-        0x6b0,
-        move |mut caller: Caller<'_, SdkState>,
-              x_pos: i32,
-              y_pos: i32,
-              format_ptr: u32,
-              _args: u32|
-              -> Result<()> {
-            let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            caller
-                .data_mut()
-                .display
-                .write_text(
-                    &format,
-                    (x_pos, y_pos),
-                    TextOptions {
-                        font_type: FontType::Small,
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-            Ok(())
-        },
-    );
-
+        // vexDisplayVSmallStringAt
+        builder.insert(
+            0x6b0,
+            move |mut caller: Caller<'_, SdkState>,
+                  x_pos: i32,
+                  y_pos: i32,
+                  format_ptr: u32,
+                  _args: u32|
+                  -> Result<()> {
+                let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
+                caller
+                    .data_mut()
+                    .display
+                    .write_text(
+                        &format,
+                        (x_pos, y_pos),
+                        TextOptions {
+                            font_type: FontType::Small,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                Ok(())
+            },
+        );
+    */
     // vexDisplayCopyRect
     builder.insert(
         0x654,
@@ -188,16 +188,10 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
             caller
                 .data_mut()
                 .display
-                .draw_buffer(
-                    &buffer,
-                    (x1 as usize, y1 as usize),
-                    (x2 as usize, y2 as usize),
-                    stride as usize,
-                )
-                .unwrap();
+                .draw_buffer(&buffer, (x1, y1), (x2, y2), stride);
             Ok(())
         },
-    );*/
+    );
 }
 
 // MARK: API
@@ -288,11 +282,27 @@ impl Display {
     fn draw_buffer(
         &mut self,
         buf: &[u8],
-        top_left: (usize, usize),
-        bot_right: (usize, usize),
-        stride: usize,
+        top_left: (i32, i32),
+        bot_right: (i32, i32),
+        stride: u32,
     ) {
-        todo!()
+        let mut y = top_left.1;
+        for row in buf.chunks(stride as usize) {
+            if y > bot_right.1 {
+                break;
+            }
+
+            let mut x = top_left.0;
+            for pixel in row.chunks(4) {
+                let color = RGB::unpack(u32::from_le_bytes(pixel[0..4].try_into().unwrap()));
+                if x >= 0 && x < self.width() as i32 && y >= 0 && y < self.height() as i32 {
+                    // SAFETY: bounds are checked
+                    unsafe { self.set_pixel(x.try_into().unwrap(), y.try_into().unwrap(), color) };
+                }
+                x += 1;
+            }
+            y += 1;
+        }
     }
 
     /// Draws the blue program header at the top of the display.
