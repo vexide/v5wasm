@@ -166,7 +166,7 @@ impl JumpTable {
     }
 }
 
-trait MemoryExt {
+pub trait MemoryExt {
     /// Utility method for reading a C-style string from this memory. Handles converting the bytes to a UTF-8 string.
     ///
     /// The string is guaranteed to exist for its entire lifetime, but because it is borrowed, it isn't possible for
@@ -191,3 +191,4 @@ macro_rules! clone_c_string {
             .map(|s| s.to_string())
     };
 }
+pub(crate) use clone_c_string;

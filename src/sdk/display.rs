@@ -1,12 +1,14 @@
 use std::ops::{Deref, DerefMut};
 
+use anyhow::Context;
 use fimg::{pixels::convert::RGB, Image, Pack};
 use resource::{resource, Resource};
+use rusttype::{point, Scale};
 use wasmtime::*;
 
 use crate::ProgramOptions;
 
-use super::{JumpTableBuilder, SdkState};
+use super::{clone_c_string, JumpTableBuilder, MemoryExt, SdkState};
 
 // MARK: Jump Table
 
@@ -97,81 +99,69 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         caller.data_mut().display.disable_double_buffer();
     });
 
-    /*// vexDisplayVPrintf
-        builder.insert(
-            0x680,
-            move |mut caller: Caller<'_, SdkState>,
-                  x_pos: i32,
-                  y_pos: i32,
-                  opaque: i32,
-                  format_ptr: u32,
-                  _args: u32|
-                  -> Result<()> {
-                let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-                caller
-                    .data_mut()
-                    .display
-                    .write_text(
-                        &format,
-                        (x_pos, y_pos),
-                        TextOptions {
-                            transparent: opaque == 0,
-                            ..Default::default()
-                        },
-                    )
-                    .unwrap();
-                Ok(())
-            },
-        );
+    // vexDisplayVPrintf
+    builder.insert(
+        0x680,
+        move |mut caller: Caller<'_, SdkState>,
+              x_pos: i32,
+              y_pos: i32,
+              opaque: i32,
+              format_ptr: u32,
+              _args: u32|
+              -> Result<()> {
+            let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
+            caller.data_mut().display.write_text(
+                &format,
+                (x_pos, y_pos),
+                TextOptions {
+                    transparent: opaque == 0,
+                    ..Default::default()
+                },
+            );
+            Ok(())
+        },
+    );
 
-        // vexDisplayVString
-        builder.insert(
-            0x684,
-            move |mut caller: Caller<'_, SdkState>,
-                  line_number: i32,
-                  format_ptr: u32,
-                  _args: u32|
-                  -> Result<()> {
-                let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-                caller
-                    .data_mut()
-                    .display
-                    .write_text(
-                        &format,
-                        TextLine(line_number).coords(),
-                        TextOptions::default(),
-                    )
-                    .unwrap();
-                Ok(())
-            },
-        );
+    // vexDisplayVString
+    builder.insert(
+        0x684,
+        move |mut caller: Caller<'_, SdkState>,
+              line_number: i32,
+              format_ptr: u32,
+              _args: u32|
+              -> Result<()> {
+            let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
+            caller.data_mut().display.write_text(
+                &format,
+                TextLine(line_number).coords(),
+                TextOptions::default(),
+            );
+            Ok(())
+        },
+    );
 
-        // vexDisplayVSmallStringAt
-        builder.insert(
-            0x6b0,
-            move |mut caller: Caller<'_, SdkState>,
-                  x_pos: i32,
-                  y_pos: i32,
-                  format_ptr: u32,
-                  _args: u32|
-                  -> Result<()> {
-                let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-                caller
-                    .data_mut()
-                    .display
-                    .write_text(
-                        &format,
-                        (x_pos, y_pos),
-                        TextOptions {
-                            font_type: FontType::Small,
-                            ..Default::default()
-                        },
-                    )
-                    .unwrap();
-                Ok(())
-            },
-        );
-    */
+    // vexDisplayVSmallStringAt
+    builder.insert(
+        0x6b0,
+        move |mut caller: Caller<'_, SdkState>,
+              x_pos: i32,
+              y_pos: i32,
+              format_ptr: u32,
+              _args: u32|
+              -> Result<()> {
+            let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
+            caller.data_mut().display.write_text(
+                &format,
+                (x_pos, y_pos),
+                TextOptions {
+                    font_type: FontType::Small,
+                    ..Default::default()
+                },
+            );
+            Ok(())
+        },
+    );
+
     // vexDisplayCopyRect
     builder.insert(
         0x654,
@@ -242,7 +232,7 @@ pub struct Display {
     pub foreground_color: RGB,
     pub background_color: RGB,
     pub canvas: Image<Box<[u8]>, 3>,
-    mono_font: Resource<[u8]>,
+    mono_font: rusttype::Font<'static>,
     program_options: ProgramOptions,
     render_mode: RenderMode,
 }
@@ -265,17 +255,17 @@ impl Display {
     pub fn new(program_options: ProgramOptions) -> Self {
         let canvas =
             Image::build(DISPLAY_WIDTH, DISPLAY_HEIGHT).fill(program_options.default_bg_color());
+        let font_bytes = resource!("/fonts/NotoMono-Regular.ttf");
+        let mono_font = rusttype::Font::try_from_vec(font_bytes.to_vec()).unwrap();
 
-        let mut display = Display {
+        Self {
             foreground_color: program_options.default_fg_color(),
             background_color: program_options.default_bg_color(),
-            mono_font: resource!("/fonts/NotoMono-Regular.ttf"),
+            mono_font,
             canvas,
             program_options,
             render_mode: RenderMode::default(),
-        };
-
-        display
+        }
     }
 
     fn draw_buffer(
@@ -381,19 +371,14 @@ impl Display {
                 .font(font, font_type.font_size());
             func(rc, text_layout)
         }
-    }
+    }*/
 
     /// Writes text to the display at a given line number.
     ///
     /// # Arguments
     ///
     /// * `opaque`: Whether the text should be drawn on top of a background color.
-    pub fn write_text(
-        &mut self,
-        text: &str,
-        coords: (i32, i32),
-        options: TextOptions,
-    ) -> Result<(), piet::Error> {
+    pub fn write_text(&mut self, text: &str, coords: (i32, i32), options: TextOptions) {
         let coords = (
             coords.0 as f64,
             (coords.1 as f64) + options.font_type.y_offset(),
@@ -401,25 +386,54 @@ impl Display {
         let fg = self.foreground_color;
         let bg = self.background_color;
 
-        self.with_text_layout(text, options.font_type, |mut rc, layout| {
-            let layout = layout.text_color(fg).build()?;
-            if !options.transparent {
-                rc.fill(
-                    Display::calculate_text_background(&layout, coords, options.font_type),
-                    &bg,
-                );
+        let scale = Scale::uniform(32.0);
+        let v_metrics = self.mono_font.v_metrics(scale);
+        let glyphs: Vec<_> = self
+            .mono_font
+            .layout(text, scale, point(0.0, 0.0 + v_metrics.ascent))
+            .collect();
+
+        let glyphs_height = (v_metrics.ascent - v_metrics.descent).ceil() as u32;
+        let glyphs_width = {
+            let min_x = glyphs
+                .first()
+                .map(|g| g.pixel_bounding_box().unwrap().min.x)
+                .unwrap();
+            let max_x = glyphs
+                .last()
+                .map(|g| g.pixel_bounding_box().unwrap().max.x)
+                .unwrap();
+            (max_x - min_x) as u32
+        };
+
+        for glyph in glyphs {
+            if let Some(bounding_box) = glyph.pixel_bounding_box() {
+                // Draw the glyph into the image per-pixel by using the draw closure
+                glyph.draw(|x, y, alpha| {
+                    println!("{alpha}");
+                    if !(x < self.width() && y < self.height()) {
+                        println!("Out of bounds: ({x}, {y})");
+                        return;
+                    }
+                    unsafe {
+                        let old_pixel = self.pixel(x, y);
+                        let blended = blend_pixel(old_pixel, fg, alpha);
+                        self.set_pixel(
+                            // Offset the position by the glyph bounding box
+                            x + bounding_box.min.x as u32 + coords.0 as u32,
+                            y + bounding_box.min.y as u32 + coords.1 as u32,
+                            // Turn the coverage into an alpha value
+                            blended,
+                        );
+                    }
+                });
             }
+        }
 
-            rc.draw_text(&layout, coords);
-            rc.finish()?;
-            Ok(())
-        })?;
-
-        self.render(false)?;
-        Ok(())
+        self.render(false);
     }
 
-    pub fn calculate_string_size(
+    /*pub fn calculate_string_size(
         &mut self,
         text: &str,
         font_size: FontType,
@@ -517,4 +531,14 @@ pub enum RenderMode {
     #[default]
     Immediate,
     DoubleBuffered,
+}
+
+fn blend_pixel(bg: RGB, fg: RGB, fg_alpha: f32) -> RGB {
+    // outputRed = (foregroundRed * foregroundAlpha) + (backgroundRed * (1.0 - foregroundAlpha));
+
+    [
+        (fg[0] as f32 * fg_alpha + bg[0] as f32 * (1.0 - fg_alpha)).round() as u8,
+        (fg[1] as f32 * fg_alpha + bg[1] as f32 * (1.0 - fg_alpha)).round() as u8,
+        (fg[2] as f32 * fg_alpha + bg[2] as f32 * (1.0 - fg_alpha)).round() as u8,
+    ]
 }

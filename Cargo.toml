@@ -12,6 +12,7 @@ fimg = { version = "0.4.41", features = ["save", "text"], default-features = fal
 fontdue = "0.8.0"
 png = "0.17.13"
 resource = "0.5.0"
+rusttype = "0.9.3"
 sdl2 = "0.36.0"
 wasmparser = "0.204.0"
 wasmtime = { version = "19.0.2", default-features = false, features = [
