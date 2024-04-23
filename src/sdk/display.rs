@@ -1,19 +1,14 @@
 use std::{
-    fs::File,
-    io::BufWriter,
     ops::{Deref, DerefMut},
 };
 
-use anyhow::Context;
 use fimg::{pixels::convert::RGB, Image};
-use fontdue::Font;
-use png::{ColorType, Encoder};
 use resource::{resource, Resource};
 use wasmtime::*;
 
 use crate::ProgramOptions;
 
-use super::{clone_c_string, JumpTableBuilder, MemoryExt, SdkState};
+use super::{JumpTableBuilder, SdkState};
 
 // MARK: Jump Table
 
@@ -336,7 +331,7 @@ impl Display {
     }
 
     /// Draws or strokes a shape on the display, in the foreground color.
-    pub fn draw(&mut self, mut shape: Path, stroke: bool) {
+    pub fn draw(&mut self, shape: Path, stroke: bool) {
         shape.draw(&mut self.canvas, stroke, self.foreground_color);
         self.render(false);
     }

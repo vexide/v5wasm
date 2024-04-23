@@ -2,14 +2,13 @@ use std::{collections::HashMap, ffi::CStr, time::Instant};
 
 use bitflags::bitflags;
 
-use sdl2::GameControllerSubsystem;
 use wasmtime::*;
 
 use crate::ProgramOptions;
 
 use self::{
     controller::{build_controller_jump_table, Inputs},
-    display::{build_display_jump_table, Display, DISPLAY_HEIGHT, DISPLAY_WIDTH},
+    display::{build_display_jump_table, Display},
 };
 
 mod controller;
@@ -192,4 +191,3 @@ macro_rules! clone_c_string {
             .map(|s| s.to_string())
     };
 }
-pub(crate) use clone_c_string;
