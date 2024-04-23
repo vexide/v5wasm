@@ -275,7 +275,6 @@ impl Display {
             render_mode: RenderMode::default(),
         };
 
-        display.erase(); // The bitmap is transparent by default, erase it to make it black.
         display
     }
 
@@ -287,7 +286,7 @@ impl Display {
         stride: u32,
     ) {
         let mut y = top_left.1;
-        for row in buf.chunks(stride as usize) {
+        for row in buf.chunks((stride * 4) as usize) {
             if y > bot_right.1 {
                 break;
             }
@@ -296,6 +295,7 @@ impl Display {
             for pixel in row.chunks(4) {
                 let color = RGB::unpack(u32::from_le_bytes(pixel[0..4].try_into().unwrap()));
                 if x >= 0 && x < self.width() as i32 && y >= 0 && y < self.height() as i32 {
+                    // I didn't see a safe version of this...?
                     // SAFETY: bounds are checked
                     unsafe { self.set_pixel(x.try_into().unwrap(), y.try_into().unwrap(), color) };
                 }
