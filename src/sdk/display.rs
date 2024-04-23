@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use fimg::{pixels::convert::RGB, Image};
+use fimg::{pixels::convert::RGB, Image, Pack};
 use resource::{resource, Resource};
 use wasmtime::*;
 
@@ -13,12 +13,12 @@ use super::{JumpTableBuilder, SdkState};
 pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) {
     // vexDisplayForegroundColor
     builder.insert(0x640, move |mut caller: Caller<'_, SdkState>, col: u32| {
-        caller.data_mut().display.foreground_color = RGB::from_u32(col);
+        caller.data_mut().display.foreground_color = RGB::unpack(col);
     });
 
     // vexDisplayBackgroundColor
     builder.insert(0x644, move |mut caller: Caller<'_, SdkState>, col: u32| {
-        caller.data_mut().display.background_color = RGB::from_u32(col);
+        caller.data_mut().display.background_color = RGB::unpack(col);
     });
 
     // vexDisplayRectDraw
@@ -214,8 +214,8 @@ impl Path {
         stroke: bool,
         color: RGB,
     ) {
-        match self {
-            &Path::Rect { x1, y1, x2, y2 } => {
+        match *self {
+            Path::Rect { x1, y1, x2, y2 } => {
                 let coords = (x1 as u32, y1 as u32);
                 let width = (x2 - x1) as u32;
                 let height = (y2 - y1) as u32;
@@ -225,7 +225,7 @@ impl Path {
                     canvas.filled_box(coords, width, height, color);
                 }
             }
-            &Path::Circle { cx, cy, radius } => {
+            Path::Circle { cx, cy, radius } => {
                 if stroke {
                     canvas.border_circle((cx, cy), radius, color);
                 } else {
@@ -269,8 +269,8 @@ impl DerefMut for Display {
 
 impl Display {
     pub fn new(program_options: ProgramOptions) -> Self {
-        let canvas = fimg::builder::Builder::new(DISPLAY_WIDTH, DISPLAY_HEIGHT)
-            .fill(program_options.default_bg_color());
+        let canvas =
+            Image::build(DISPLAY_WIDTH, DISPLAY_HEIGHT).fill(program_options.default_bg_color());
 
         let mut display = Display {
             foreground_color: program_options.default_fg_color(),
@@ -421,34 +421,6 @@ impl Display {
             Ok(size)
         })
     }*/
-}
-
-pub trait RGBExt {
-    /// Creates a `Color` from a 32-bit RGB value.
-    ///
-    /// ```
-    /// # use femtovg::Color;
-    /// assert_eq!(Color::rgb_u32(0x00FF00), Color::rgb(0x00, 0xFF, 0x00));
-    /// ```
-    ///
-    /// # Arguments
-    ///
-    /// * `rgb` - The 32-bit RGB value representing the color.
-    ///
-    /// # Returns
-    ///
-    /// A `Color` instance representing the specified RGB value.
-    fn from_u32(rgb: u32) -> RGB;
-}
-
-impl RGBExt for RGB {
-    fn from_u32(rgb: u32) -> RGB {
-        [
-            ((rgb >> 16) & 0xFF) as u8,
-            ((rgb >> 8) & 0xFF) as u8,
-            (rgb & 0xFF) as u8,
-        ]
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
