@@ -8,7 +8,7 @@ use std::{
 use anyhow::Context;
 use fimg::{pixels::convert::RGB, Image, Pack};
 use resource::{resource, Resource};
-use rusttype::{point, PositionedGlyph, Rect, Scale};
+use rusttype::{point, Point, PositionedGlyph, Rect, Scale};
 use wasmtime::*;
 
 use crate::ProgramOptions;
@@ -80,8 +80,8 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
             let size = caller
                 .data()
                 .display
-                .calculate_string_size(&string, FontType::Normal);
-            Ok(size.max.x as u32)
+                .calculate_string_size(string, FontType::Normal);
+            Ok(size.x as u32)
         },
     );
 
@@ -93,8 +93,8 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
             let size = caller
                 .data()
                 .display
-                .calculate_string_size(&string, FontType::Normal);
-            Ok(size.max.y as u32)
+                .calculate_string_size(string, FontType::Normal);
+            Ok(size.y as u32)
         },
     );
 
@@ -203,7 +203,33 @@ pub enum Path {
     Circle { cx: i32, cy: i32, radius: i32 },
 }
 
+impl From<Rect<i32>> for Path {
+    fn from(rect: Rect<i32>) -> Self {
+        Path::Rect {
+            x1: rect.min.x,
+            y1: rect.min.y,
+            x2: rect.max.x,
+            y2: rect.max.y,
+        }
+    }
+}
+
 impl Path {
+    fn normalize(&mut self) {
+        match self {
+            Path::Rect { x1, y1, x2, y2 } => {
+                *x1 = (*x1).clamp(0, DISPLAY_WIDTH as i32 - 1);
+                *y1 = (*y1).clamp(0, DISPLAY_HEIGHT as i32 - 1);
+                *x2 = (*x2).clamp(0, DISPLAY_WIDTH as i32 - 1);
+                *y2 = (*y2).clamp(0, DISPLAY_HEIGHT as i32 - 1);
+            }
+            Path::Circle { cx, cy, .. } => {
+                *cx = (*cx).clamp(0, DISPLAY_WIDTH as i32 - 1);
+                *cy = (*cy).clamp(0, DISPLAY_HEIGHT as i32 - 1);
+            }
+        }
+    }
+
     fn draw<T: AsMut<[u8]> + AsRef<[u8]>>(
         &self,
         canvas: &mut Image<T, 3>,
@@ -213,8 +239,8 @@ impl Path {
         match *self {
             Path::Rect { x1, y1, x2, y2 } => {
                 let coords = (x1 as u32, y1 as u32);
-                let width = (x2 - x1) as u32;
-                let height = (y2 - y1) as u32;
+                let width = (x2 - x1).try_into().unwrap();
+                let height = (y2 - y1).try_into().unwrap();
                 if stroke {
                     canvas.r#box(coords, width, height, color);
                 } else {
@@ -247,7 +273,7 @@ pub struct Display {
     mono_font: rusttype::Font<'static>,
     program_options: ProgramOptions,
     render_mode: RenderMode,
-    metrics_cache: Cell<Option<(String, FontType, Vec<PositionedGlyph<'static>>)>>,
+    text_layout_cache: Cell<Option<(String, FontType, Vec<PositionedGlyph<'static>>)>>,
 }
 
 impl Deref for Display {
@@ -278,7 +304,7 @@ impl Display {
             canvas,
             program_options,
             render_mode: RenderMode::default(),
-            metrics_cache: Cell::default(),
+            text_layout_cache: Cell::default(),
         }
     }
 
@@ -343,7 +369,8 @@ impl Display {
     }
 
     /// Draws or strokes a shape on the display, in the foreground color.
-    pub fn draw(&mut self, shape: Path, stroke: bool) {
+    pub fn draw(&mut self, mut shape: Path, stroke: bool) {
+        shape.normalize();
         shape.draw(&mut self.canvas, stroke, self.foreground_color);
         self.render(false);
     }
@@ -353,8 +380,8 @@ impl Display {
         text: &str,
         font_type: FontType,
     ) -> Option<Vec<PositionedGlyph<'static>>> {
-        let (cached_text, cached_font, glyphs) = self.metrics_cache.take()?;
-        if text == &cached_text && font_type == cached_font {
+        let (cached_text, cached_font, glyphs) = self.text_layout_cache.take()?;
+        if text == cached_text && font_type == cached_font {
             Some(glyphs)
         } else {
             None
@@ -366,106 +393,102 @@ impl Display {
             return glyphs;
         }
 
-        let scale = Scale::uniform(font_type.font_size());
+        let scale = Scale {
+            y: font_type.font_size(),
+            // V5's version of the Noto Mono font is slightly different
+            // than the one bundled with the simulator, so we have to apply
+            // an scale on the X axis and later move the characters further apart.
+            x: font_type.font_size() * FontType::x_scale(),
+        };
         let v_metrics = self.mono_font.v_metrics(scale);
         self.mono_font
             .layout(text, scale, point(0.0, 0.0 + v_metrics.ascent))
             .collect()
     }
 
-    /*/// Calculates the shape of the area behind a text layout, so that it can be drawn on top of a background color.
+    /// Calculates the shape of the area behind a text layout, so that it can be drawn on top of a background color.
     fn calculate_text_background(
-        text_layout: &PietTextLayout,
-        coords: (f64, f64),
+        glyphs: &[PositionedGlyph],
+        coords: (i32, i32),
         font_size: FontType,
-    ) -> Rect {
-        let size = text_layout.size();
-        Rect::new(
-            coords.0,
-            coords.1 + font_size.backdrop_y_offset(),
-            coords.0 + size.width,
-            coords.1 + font_size.line_height() + font_size.backdrop_y_offset(),
-        )
-    }
+    ) -> Option<Path> {
+        let size = size_of_layout(glyphs)?;
+        let mut backdrop = Path::Rect {
+            x1: size.min.x + coords.0 - 1,
+            y1: coords.1 + font_size.backdrop_y_offset(),
+            x2: size.max.x + coords.0 + 1,
+            y2: coords.1 + font_size.backdrop_y_offset() + font_size.line_height() - 1,
+        };
 
-    fn with_text_layout<T>(
-        &mut self,
-        text: &str,
-        font_type: FontType,
-        func: impl FnOnce(Piet, PietTextLayoutBuilder) -> Result<T, piet::Error>,
-    ) -> Result<T, piet::Error> {
-        let text = text.replace('\n', ".");
-        #[cfg(not(target_os = "windows"))]
-        let font = self.mono_font.clone();
-        {
-            let mut rc = self.render_context();
-            // apparently you need to load the font every time on Windows,
-            // this obviously isn't good for performance but is there really an alternative?
-            // might come back to this later
-            #[cfg(target_os = "windows")]
-            let font = Display::load_font(&mut rc)?;
-            let text_layout = rc
-                .text()
-                .new_text_layout(text)
-                .font(font, font_type.font_size());
-            func(rc, text_layout)
-        }
-    }*/
+        backdrop.normalize();
+        Some(backdrop)
+    }
 
     /// Writes text to the display at a given line number.
     ///
     /// # Arguments
     ///
     /// * `opaque`: Whether the text should be drawn on top of a background color.
-    pub fn write_text(&mut self, text: String, coords: (i32, i32), options: TextOptions) {
-        let coords = (
-            coords.0 as f64,
-            (coords.1 as f64) + options.font_type.y_offset(),
-        );
-        let fg = self.foreground_color;
+    pub fn write_text(&mut self, text: String, mut coords: (i32, i32), options: TextOptions) {
+        if text.is_empty() {
+            return;
+        }
 
+        // The V5's text is all offset vertically from ours, so this adjustment makes it consistent.
+        coords.1 += options.font_type.y_offset();
+
+        let fg = self.foreground_color;
         let glyphs = self.glyphs_for(&text, options.font_type);
 
-        for glyph in glyphs.iter() {
+        if !options.transparent {
+            let backdrop =
+                Self::calculate_text_background(&glyphs, coords, options.font_type).unwrap();
+            backdrop.draw(&mut self.canvas, false, self.background_color);
+        }
+
+        for (idx, glyph) in glyphs.iter().enumerate() {
             if let Some(bounding_box) = glyph.pixel_bounding_box() {
-                // Draw the glyph into the image per-pixel by using the draw closure
-                glyph.draw(|x, y, alpha| {
-                    let x = x + bounding_box.min.x as u32 + coords.0 as u32;
-                    let y = y + bounding_box.min.y as u32 + coords.1 as u32;
+                // Draw the glyph into the image per-pixel
+                glyph.draw(|mut x, mut y, alpha| {
+                    // Apply offsets to make the coordinates image-relative, not text-relative
+                    x += bounding_box.min.x as u32
+                        + coords.0 as u32
+                        // Similar reasoning to when we applied the x scale to the font.
+                        + (FontType::x_spacing() * idx as f32) as u32;
+                    y += bounding_box.min.y as u32 + coords.1 as u32;
+
                     if !(x < self.width() && y < self.height()) {
                         return;
                     }
+
+                    // I didn't find a safe version of pixel and set_pixel.
+                    // SAFETY: Pixel bounds are checked.
                     unsafe {
                         let old_pixel = self.pixel(x, y);
-                        let blended = blend_pixel(old_pixel, fg, alpha);
+
                         self.set_pixel(
-                            // Offset the position by the glyph bounding box
-                            x, y, // Turn the coverage into an alpha value
-                            blended,
+                            x,
+                            y,
+                            // Taking this power seems to make the alpha blending look better;
+                            // otherwise it's not heavy enough.
+                            blend_pixel(old_pixel, fg, alpha.powf(0.4).clamp(0.0, 1.0)),
                         );
                     }
                 });
             }
         }
 
-        self.metrics_cache
+        // Add (or re-add) the laid-out glyphs to the cache so they can be used later.
+        self.text_layout_cache
             .set(Some((text, options.font_type, glyphs)));
         self.render(false);
     }
 
-    pub fn calculate_string_size(&self, text: &str, font_type: FontType) -> Rect<i32> {
-        let glyphs = self.glyphs_for(text, font_type);
-        let Some(last_char) = glyphs.as_slice().last() else {
-            return Rect {
-                min: point(0, 0),
-                max: point(0, 0),
-            };
-        };
-        let last_bounding_box = last_char.pixel_bounding_box().unwrap();
-        Rect {
-            min: point(0, 0),
-            max: last_bounding_box.max,
-        }
+    pub fn calculate_string_size(&self, text: String, font_type: FontType) -> Point<i32> {
+        let glyphs = self.glyphs_for(&text, font_type);
+        let size = size_of_layout(&glyphs);
+        self.text_layout_cache.set(Some((text, font_type, glyphs)));
+        size.unwrap_or_default().max
     }
 }
 
@@ -487,35 +510,43 @@ pub enum FontType {
 }
 
 impl FontType {
+    pub fn x_scale() -> f32 {
+        0.9
+    }
+
+    pub fn x_spacing() -> f32 {
+        1.1
+    }
+
     pub fn font_size(&self) -> f32 {
         match self {
-            FontType::Small => 13.0,
+            FontType::Small => 15.0,
             FontType::Normal => 16.0,
             FontType::Big => 32.0,
         }
     }
 
-    pub fn y_offset(&self) -> f64 {
+    pub fn y_offset(&self) -> i32 {
         match self {
-            FontType::Small => -4.0,
-            FontType::Normal => -2.0,
-            FontType::Big => -1.0,
+            FontType::Small => -2,
+            FontType::Normal => -2,
+            FontType::Big => -1,
         }
     }
 
-    pub fn line_height(&self) -> f64 {
+    pub fn line_height(&self) -> i32 {
         match self {
-            FontType::Small => 13.0,
-            FontType::Normal => 2.0,
-            FontType::Big => 2.0,
+            FontType::Small => 13,
+            FontType::Normal => 2,
+            FontType::Big => 2,
         }
     }
 
-    pub fn backdrop_y_offset(&self) -> f64 {
+    pub fn backdrop_y_offset(&self) -> i32 {
         match self {
-            FontType::Small => 4.0,
-            FontType::Normal => 0.0,
-            FontType::Big => 0.0,
+            FontType::Small => 2,
+            FontType::Normal => 0,
+            FontType::Big => 0,
         }
     }
 }
@@ -563,4 +594,18 @@ fn blend_pixel(bg: RGB, fg: RGB, fg_alpha: f32) -> RGB {
         (fg[1] as f32 * fg_alpha + bg[1] as f32 * (1.0 - fg_alpha)).round() as u8,
         (fg[2] as f32 * fg_alpha + bg[2] as f32 * (1.0 - fg_alpha)).round() as u8,
     ]
+}
+
+fn size_of_layout(glyphs: &[PositionedGlyph]) -> Option<Rect<i32>> {
+    let last_char = glyphs.last()?;
+    let first_char = &glyphs[0];
+    let last_bounding_box = last_char.pixel_bounding_box().unwrap();
+    let first_bounding_box = first_char.pixel_bounding_box().unwrap();
+    Some(Rect {
+        min: first_bounding_box.min,
+        max: Point {
+            x: last_bounding_box.max.x + (FontType::x_spacing() * glyphs.len() as f32) as i32,
+            y: last_bounding_box.max.y,
+        },
+    })
 }

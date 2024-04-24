@@ -97,6 +97,10 @@ fn load_program(engine: &Engine, path: &str) -> Result<(Module, ProgramOptions)>
 }
 
 fn main() -> Result<()> {
+    ctrlc::set_handler(move || {
+        std::process::exit(0);
+    })
+    .unwrap();
     // This is required for certain controllers to work on Windows without the
     // video subsystem enabled:
     sdl2::hint::set("SDL_JOYSTICK_THREAD", "1");
