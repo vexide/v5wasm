@@ -1,9 +1,14 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    cell::Cell,
+    hash::DefaultHasher,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use fimg::{pixels::convert::RGB, Image, Pack};
 use resource::{resource, Resource};
-use rusttype::{point, Scale};
+use rusttype::{point, PositionedGlyph, Rect, Scale};
 use wasmtime::*;
 
 use crate::ProgramOptions;
@@ -68,23 +73,30 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     );
 
     // vexDisplayStringWidthGet
-    /*builder.insert(
+    builder.insert(
         0x6c0,
         move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
             let string = clone_c_string!(string_ptr as usize, from caller using memory)?;
             let size = caller
-                .data_mut()
+                .data()
                 .display
-                .calculate_string_size(&string, FontType::Normal)
-                .unwrap();
-            Ok(size.width as u32)
+                .calculate_string_size(&string, FontType::Normal);
+            Ok(size.max.x as u32)
         },
     );
 
     // vexDisplayStringHeightGet
-    builder.insert(0x6c4, move |_string_ptr: i32| {
-        Ok(FontType::Normal.line_height() as u32)
-    });*/
+    builder.insert(
+        0x6c4,
+        move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
+            let string = clone_c_string!(string_ptr as usize, from caller using memory)?;
+            let size = caller
+                .data()
+                .display
+                .calculate_string_size(&string, FontType::Normal);
+            Ok(size.max.y as u32)
+        },
+    );
 
     // vexDisplayRender
     builder.insert(
@@ -111,7 +123,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
             caller.data_mut().display.write_text(
-                &format,
+                format,
                 (x_pos, y_pos),
                 TextOptions {
                     transparent: opaque == 0,
@@ -132,7 +144,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
             caller.data_mut().display.write_text(
-                &format,
+                format,
                 TextLine(line_number).coords(),
                 TextOptions::default(),
             );
@@ -151,7 +163,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
             caller.data_mut().display.write_text(
-                &format,
+                format,
                 (x_pos, y_pos),
                 TextOptions {
                     font_type: FontType::Small,
@@ -235,6 +247,7 @@ pub struct Display {
     mono_font: rusttype::Font<'static>,
     program_options: ProgramOptions,
     render_mode: RenderMode,
+    metrics_cache: Cell<Option<(String, FontType, Vec<PositionedGlyph<'static>>)>>,
 }
 
 impl Deref for Display {
@@ -265,6 +278,7 @@ impl Display {
             canvas,
             program_options,
             render_mode: RenderMode::default(),
+            metrics_cache: Cell::default(),
         }
     }
 
@@ -334,6 +348,31 @@ impl Display {
         self.render(false);
     }
 
+    fn take_cached_glyphs_for(
+        &self,
+        text: &str,
+        font_type: FontType,
+    ) -> Option<Vec<PositionedGlyph<'static>>> {
+        let (cached_text, cached_font, glyphs) = self.metrics_cache.take()?;
+        if text == &cached_text && font_type == cached_font {
+            Some(glyphs)
+        } else {
+            None
+        }
+    }
+
+    fn glyphs_for(&self, text: &str, font_type: FontType) -> Vec<PositionedGlyph<'static>> {
+        if let Some(glyphs) = self.take_cached_glyphs_for(text, font_type) {
+            return glyphs;
+        }
+
+        let scale = Scale::uniform(font_type.font_size());
+        let v_metrics = self.mono_font.v_metrics(scale);
+        self.mono_font
+            .layout(text, scale, point(0.0, 0.0 + v_metrics.ascent))
+            .collect()
+    }
+
     /*/// Calculates the shape of the area behind a text layout, so that it can be drawn on top of a background color.
     fn calculate_text_background(
         text_layout: &PietTextLayout,
@@ -378,43 +417,22 @@ impl Display {
     /// # Arguments
     ///
     /// * `opaque`: Whether the text should be drawn on top of a background color.
-    pub fn write_text(&mut self, text: &str, coords: (i32, i32), options: TextOptions) {
+    pub fn write_text(&mut self, text: String, coords: (i32, i32), options: TextOptions) {
         let coords = (
             coords.0 as f64,
             (coords.1 as f64) + options.font_type.y_offset(),
         );
         let fg = self.foreground_color;
-        let bg = self.background_color;
 
-        let scale = Scale::uniform(32.0);
-        let v_metrics = self.mono_font.v_metrics(scale);
-        let glyphs: Vec<_> = self
-            .mono_font
-            .layout(text, scale, point(0.0, 0.0 + v_metrics.ascent))
-            .collect();
+        let glyphs = self.glyphs_for(&text, options.font_type);
 
-        let glyphs_height = (v_metrics.ascent - v_metrics.descent).ceil() as u32;
-        let glyphs_width = {
-            let min_x = glyphs
-                .first()
-                .map(|g| g.pixel_bounding_box().unwrap().min.x)
-                .unwrap();
-            let max_x = glyphs
-                .last()
-                .map(|g| g.pixel_bounding_box().unwrap().max.x)
-                .unwrap();
-            (max_x - min_x) as u32
-        };
-
-        for glyph in glyphs {
+        for glyph in glyphs.iter() {
             if let Some(bounding_box) = glyph.pixel_bounding_box() {
                 // Draw the glyph into the image per-pixel by using the draw closure
                 glyph.draw(|x, y, alpha| {
-                    println!("{alpha}");
                     let x = x + bounding_box.min.x as u32 + coords.0 as u32;
                     let y = y + bounding_box.min.y as u32 + coords.1 as u32;
                     if !(x < self.width() && y < self.height()) {
-                        println!("Out of bounds: ({x}, {y})");
                         return;
                     }
                     unsafe {
@@ -430,21 +448,25 @@ impl Display {
             }
         }
 
+        self.metrics_cache
+            .set(Some((text, options.font_type, glyphs)));
         self.render(false);
     }
 
-    /*pub fn calculate_string_size(
-        &mut self,
-        text: &str,
-        font_size: FontType,
-    ) -> Result<Size, piet::Error> {
-        self.with_text_layout(text, font_size, |mut rc, layout| {
-            let mut size = layout.build()?.size();
-            size.height = font_size.line_height();
-            rc.finish()?;
-            Ok(size)
-        })
-    }*/
+    pub fn calculate_string_size(&self, text: &str, font_type: FontType) -> Rect<i32> {
+        let glyphs = self.glyphs_for(text, font_type);
+        let Some(last_char) = glyphs.as_slice().last() else {
+            return Rect {
+                min: point(0, 0),
+                max: point(0, 0),
+            };
+        };
+        let last_bounding_box = last_char.pixel_bounding_box().unwrap();
+        Rect {
+            min: point(0, 0),
+            max: last_bounding_box.max,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -465,7 +487,7 @@ pub enum FontType {
 }
 
 impl FontType {
-    pub fn font_size(&self) -> f64 {
+    pub fn font_size(&self) -> f32 {
         match self {
             FontType::Small => 13.0,
             FontType::Normal => 16.0,
