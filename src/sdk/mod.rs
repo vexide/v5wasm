@@ -26,12 +26,13 @@ pub struct SdkState {
 impl SdkState {
     pub fn new(module: Module, program_options: ProgramOptions) -> Self {
         let sdl = sdl2::init().unwrap();
+        let start = Instant::now();
         SdkState {
             module,
-            display: Display::new(program_options),
+            display: Display::new(program_options, start),
             program_options,
             inputs: Inputs::new(sdl.game_controller().unwrap()),
-            program_start: Instant::now(),
+            program_start: start,
         }
     }
 }
