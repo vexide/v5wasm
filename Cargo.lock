@@ -87,12 +87,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
-name = "bytemuck"
-version = "1.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d6d68c57235a3a081186990eca2867354726650f42f7516ca50c28d6281fd15"
-
-[[package]]
 name = "bytes"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -236,7 +230,7 @@ dependencies = [
  "itertools",
  "log",
  "smallvec",
- "wasmparser 0.202.0",
+ "wasmparser",
  "wasmtime-types",
 ]
 
@@ -822,16 +816,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitflags 2.5.0",
- "bytemuck",
  "bytes",
  "ctrlc",
  "fimg",
- "png",
  "resource",
  "rusttype",
  "sdl2",
  "single_value_channel",
- "wasmparser 0.205.0",
+ "wasmparser",
  "wasmtime",
 ]
 
@@ -849,17 +841,6 @@ name = "wasmparser"
 version = "0.202.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6998515d3cf3f8b980ef7c11b29a9b1017d4cf86b99ae93b546992df9931413"
-dependencies = [
- "bitflags 2.5.0",
- "indexmap",
- "semver",
-]
-
-[[package]]
-name = "wasmparser"
-version = "0.205.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d457bb52804242e09d55a306e53ddbc65d1d29ed83db6a4eea3ed412ee0cfdf"
 dependencies = [
  "bitflags 2.5.0",
  "indexmap",
@@ -891,7 +872,7 @@ dependencies = [
  "serde_json",
  "target-lexicon",
  "wasm-encoder",
- "wasmparser 0.202.0",
+ "wasmparser",
  "wasmtime-cranelift",
  "wasmtime-environ",
  "wasmtime-jit-icache-coherence",
@@ -928,7 +909,7 @@ dependencies = [
  "object",
  "target-lexicon",
  "thiserror",
- "wasmparser 0.202.0",
+ "wasmparser",
  "wasmtime-environ",
  "wasmtime-versioned-export-macros",
 ]
@@ -952,7 +933,7 @@ dependencies = [
  "serde_derive",
  "target-lexicon",
  "thiserror",
- "wasmparser 0.202.0",
+ "wasmparser",
  "wasmtime-types",
 ]
 
@@ -1021,7 +1002,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
- "wasmparser 0.202.0",
+ "wasmparser",
 ]
 
 [[package]]
