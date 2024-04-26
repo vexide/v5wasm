@@ -11,7 +11,7 @@ ctrlc = "3.4.4"
 fimg = { version = "0.4.41", features = ["save"], default-features = false }
 resource = "0.5.0"
 rusttype = "0.9.3"
-sdl2 = "0.36.0"
+sdl2 = { version = "0.36.0", features = ["bundled", "static-link"] }
 single_value_channel = "1.2.2"
 wasmparser = "0.202"
 wasmtime = { version = "20.0.0", default-features = false, features = [

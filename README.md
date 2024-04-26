@@ -6,9 +6,7 @@ If you'd like any help getting this working, don't hesitate to ask on the Vexide
 
 ## Building
 
-This project uses the `sdl2` Rust crate for Controller input, which is, for **Windows** users, a little harder to set up. The crate authors have pretty good instructions which you can check out [here](https://github.com/Rust-SDL2/rust-sdl2?tab=readme-ov-file#windows-msvc), under the "Windows (MSVC)" section. When trying it on Windows myself, I used the option where you set the LIB environment variable. I've already handled the step where you put SDL2.dll in the repository folder.
-
-On Mac/Linux use a package manager to install sdl2.
+You will need Cmake installed so that Cargo can build SDL2.
 
 Apart from that, you should be able to run `cargo build` to get a binary.
 
