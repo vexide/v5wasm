@@ -1,7 +1,8 @@
-use std::{collections::HashMap, ffi::CStr, time::Instant};
+use std::{collections::HashMap, ffi::CStr, io::{self, BufReader, Stdin, StdinLock, Stdout, StdoutLock}, sync::mpsc, time::Instant};
 
 use bitflags::bitflags;
 
+use vexide_simulator_protocol::{Command, Event};
 use wasmtime::*;
 
 use crate::ProgramOptions;
@@ -14,6 +15,32 @@ use self::{
 mod controller;
 pub mod display;
 
+pub struct Frontend {
+    connection: StdoutLock<'static>,
+    read_stream: mpsc::Receiver<Command>,
+}
+
+impl Frontend {
+    /// Creates a new Frontend interface using the process stdin and stdout.
+    pub fn new() -> Self {
+        let stdin = io::stdin().lock();
+        let stdout = io::stdout().lock();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            todo!();
+        });
+        Self { connection: stdout, read_stream: rx }
+    }
+
+    pub fn send_event(&mut self, event: &Event) {
+        jsonl::write(&mut self.connection, event).unwrap();
+    }
+
+    pub fn poll_commands(&mut self) -> Vec<Command> {
+        self.read_stream.recv()
+    }
+}
+
 /// The state of the SDK, containing the program's WASM module, the robot display, and other peripherals.
 pub struct SdkState {
     module: Module,
@@ -21,6 +48,7 @@ pub struct SdkState {
     display: Display,
     program_options: ProgramOptions,
     inputs: Inputs,
+    frontend:
 }
 
 impl SdkState {
