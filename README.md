@@ -1,6 +1,6 @@
 # VEX SDK Simulator
 
-> Executes WebAssembly code that relies on the VEX V5 SDK and jump table.
+> Execute WebAssembly programs that rely on the VEX V5 SDK and jump table.
 
 If you'd like any help getting this working, don't hesitate to ask on the Vexide Discord server linked on [our website](https://pros.rs/)!
 
@@ -8,13 +8,21 @@ If you'd like any help getting this working, don't hesitate to ask on the Vexide
 
 You will need Cmake installed so that Cargo can build SDL2.
 
-Apart from that, you should be able to run `cargo build` to get a binary.
+Apart from that, you should be able to run `cargo install --git "https://github.com/vexide/vex-sdk-sim.git"` to install the simulator.
 
 You might also be able to get builds from the "Releases" tab on Github, but they could be out of date or missing.
 
 ## Getting Started
 
-The simulator looks for a file called `program.wasm` in the current working directory, and will simulate this. Right now the easiest way to use the simulator over time is to make a symbolic link at `program.wasm` to `./target/wasm32-unknown-unknown/debug/{project name}.wasm`.
+The simulator expects a single argument `<PROGRAM>` which is the path to the `.wasm` program that you would like to run. In Rust projects,
+this file is located at `./target/wasm32-unknown-unknown/debug/{crate-name}.wasm`.
+
+Example usage:
+
+```sh
+cargo pros build -s
+vex-sdk-sim ./target/wasm32-unknown-unknown/debug/vexide-template.wasm
+```
 
 ### Building the WASM file
 
@@ -47,7 +55,6 @@ What's missing:
 - Touch support for the display
 - [Vexide Simulator Interface](https://internals.pros.rs/simulators/interface)
 - A few random missing APIs, if you need them just ask in the Discord mentioned above and I'll fix it (or show you how to fix it if you want)
-
 
 ## Understanding error messages
 

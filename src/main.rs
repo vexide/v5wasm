@@ -1,6 +1,10 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Context;
 use bytes::{Buf, Bytes};
+use clap::Parser as _;
 use fimg::pixels::convert::RGB;
+use fs_err as fs;
 
 use sdk::display::{BLACK, WHITE};
 use wasmparser::{Parser, Payload};
@@ -11,6 +15,20 @@ use crate::sdk::{JumpTable, SdkState};
 mod sdk;
 
 const HEADER_MAGIC: &[u8] = b"XVX5";
+
+/// Execute WebAssembly programs that rely on the VEX V5 SDK and jump table.
+///
+/// In order to be simulated, robot code should be WebAssembly-formatted (`.wasm`
+/// file) and contain a V5 code signature in a custom section named `.cold_magic`.
+/// Programs may utilize the VEX V5 jumptable to interact with simulated subsystems.
+///
+/// A WASI environment is not provided.
+#[derive(Debug, clap::Parser)]
+#[command(version)]
+struct Args {
+    /// The path to the WebAssembly robot program that will be executed.
+    program: PathBuf,
+}
 
 // const PROGRAM_TYPE_USER: u32 = 0;
 // const PROGRAM_OWNER_SYS: u32 = 0;
@@ -48,12 +66,12 @@ impl ProgramOptions {
 }
 
 /// Loads a user program from a file, parsing the cold header and creating a module.
-fn load_program(engine: &Engine, path: &str) -> Result<(Module, ProgramOptions)> {
+fn load_program(engine: &Engine, path: &Path) -> Result<(Module, ProgramOptions)> {
     const PROGRAM_OPTIONS_INVERT_DEFAULT_GRAPHICS_COLORS: u32 = 1 << 0;
     const PROGRAM_OPTIONS_KILL_THREADS_WHEN_MAIN_EXITS: u32 = 1 << 1;
     const PROGRAM_OPTIONS_INVERT_GRAPHICS_BASED_ON_THEME: u32 = 1 << 2;
 
-    let program = std::fs::read(path)?;
+    let program = fs::read(path)?;
 
     // in Vexide programs the cold header is stored in a section called ".cold_magic"
     let mut cold_header = None;
@@ -101,19 +119,23 @@ fn main() -> Result<()> {
         std::process::exit(0);
     })
     .unwrap();
+
+    let args = Args::parse();
+
     // This is required for certain controllers to work on Windows without the
     // video subsystem enabled:
     sdl2::hint::set("SDL_JOYSTICK_THREAD", "1");
 
-    println!("Compiling...");
+    eprintln!("Compiling...");
     let engine = Engine::new(
         Config::new()
             .debug_info(true)
             .wasm_backtrace_details(WasmBacktraceDetails::Enable),
     )?;
-    let (module, cold_header) = load_program(&engine, "program.wasm").unwrap();
+    let (module, cold_header) =
+        load_program(&engine, &args.program).context("Failed to load robot program")?;
 
-    println!("Booting...");
+    eprintln!("Booting...");
 
     let state = SdkState::new(module.clone(), cold_header);
 
@@ -161,7 +183,7 @@ fn main() -> Result<()> {
     sdk.expose(&mut store, &table, &memory)?;
 
     // We should be ready to actually run the entrypoint now.
-    println!("_entry()");
+    eprintln!("_entry()");
     let run = instance.get_typed_func::<(), ()>(&mut store, "_entry")?;
     run.call(&mut store, ())?;
 
