@@ -1,6 +1,6 @@
 [package]
 name = "vex-sdk-sim"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]
@@ -15,8 +15,9 @@ resource = "0.5.0"
 rusttype = "0.9.3"
 sdl2 = { version = "0.36.0", features = ["bundled", "static-link"] }
 single_value_channel = "1.2.2"
-wasmparser = "0.202"
-wasmtime = { version = "20.0.0", default-features = false, features = [
+wasmparser = "0.208.1"
+wasmtime = { version = "21.0.1", default-features = false, features = [
+    "std",
     # "cache",
     "parallel-compilation",
     "cranelift",

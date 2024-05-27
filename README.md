@@ -2,11 +2,14 @@
 
 > Execute WebAssembly programs that rely on the VEX V5 SDK and jump table.
 
-If you'd like any help getting this working, don't hesitate to ask on the Vexide Discord server linked on [our website](https://pros.rs/)!
+If you'd like any help getting this working, don't hesitate to ask on the Vexide Discord server linked on [our website](https://vexide.dev/)!
 
 ## Building
 
-You will need Cmake installed so that Cargo can build SDL2.
+Prerequisites:
+
+- A recent version of Rust
+- CMake, so that Cargo can build SDL2
 
 Apart from that, you should be able to run `cargo install --git "https://github.com/vexide/vex-sdk-sim.git"` to install the simulator.
 
@@ -26,16 +29,16 @@ vex-sdk-sim ./target/wasm32-unknown-unknown/debug/vexide-template.wasm
 
 ### Building the WASM file
 
-You can't just simulate any `.wasm` file! The simulator will error out early if the program does not have a V5 code signature ("cold header").
+The simulator doesn't work with every `.wasm` file, so you'll have to follow these instructions to make one that's compatible.
 
-To make a Vexide project compatible with the simulator, add code snippet to `.cargo/config.toml`:
+To make a vexide project compatible with the simulator, ensure the following code snippet is somewhere in `.cargo/config.toml`:
 
 ```toml
 [target.wasm32-unknown-unknown]
 rustflags = ["-Clink-arg=--export-memory", "-Clink-arg=--import-table"]
 ```
 
-Then, compile the project with `cargo build --target wasm32-unknown-unknown` or `cargo pros build -s`.
+Then, compile the project with `cargo pros build -s` or `cargo build --target wasm32-unknown-unknown`.
 
 ### Interacting with the simulator
 
@@ -53,12 +56,12 @@ What's missing:
 - Every Device API (yeah...)
 - Stdin/Stderr
 - Touch support for the display
-- [Vexide Simulator Interface](https://internals.pros.rs/simulators/interface)
+- [Vexide Simulator Interface](https://internals.vexide.dev/simulators/protocol)
 - A few random missing APIs, if you need them just ask in the Discord mentioned above and I'll fix it (or show you how to fix it if you want)
 
 ## Understanding error messages
 
-If the program crashes with "No such file or directory", your program is probably missing.
+If the simulator crashes with "No such file or directory", your program is probably missing.
 
 If you get a "wasm trap: uninitialized element" error, it's possible an SDK call isn't implemented yet. For example, this error means `vexBatteryCurrentGet` isn't implemented:
 
