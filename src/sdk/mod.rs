@@ -1,10 +1,15 @@
 use std::{collections::HashMap, ffi::CStr, time::Instant};
 
+use anyhow::bail;
 use bitflags::bitflags;
 
+use vexide_simulator_protocol::{Command, CompMode, Event};
 use wasmtime::*;
 
-use crate::ProgramOptions;
+use crate::{
+    protocol::{Protocol, ProtocolError},
+    ProgramOptions,
+};
 
 use self::{
     controller::{build_controller_jump_table, Inputs},
@@ -14,6 +19,25 @@ use self::{
 mod controller;
 pub mod display;
 
+#[derive(Debug)]
+pub struct CompetitionMode {
+    connected: bool,
+    mode: CompMode,
+    is_competition: bool,
+    enabled: bool,
+}
+
+impl Default for CompetitionMode {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            connected: false,
+            mode: CompMode::Driver,
+            is_competition: false,
+        }
+    }
+}
+
 /// The state of the SDK, containing the program's WASM module, the robot display, and other peripherals.
 pub struct SdkState {
     module: Module,
@@ -21,19 +45,98 @@ pub struct SdkState {
     display: Display,
     program_options: ProgramOptions,
     inputs: Inputs,
+    competition_mode: CompetitionMode,
+    protocol: Protocol,
+    is_executing: bool,
 }
 
 impl SdkState {
-    pub fn new(module: Module, program_options: ProgramOptions) -> Self {
+    pub fn new(module: Module, program_options: ProgramOptions, protocol: Protocol) -> Self {
         let sdl = sdl2::init().unwrap();
         let start = Instant::now();
         SdkState {
             module,
             display: Display::new(program_options, start),
             program_options,
-            inputs: Inputs::new(sdl.game_controller().unwrap()),
+            inputs: Inputs::new(sdl),
             program_start: start,
+            competition_mode: CompetitionMode::default(),
+            protocol,
+            is_executing: false,
         }
+    }
+
+    /// Signal that the simulator is ready to begin and process all setup commands.
+    pub fn setup(&mut self) -> anyhow::Result<()> {
+        self.protocol.send(&Event::Ready)?;
+        while !self.is_executing {
+            self.recv_command()?;
+        }
+        Ok(())
+    }
+
+    /// Process the next command, blocking if it hasn't been received yet.
+    pub fn recv_command(&mut self) -> anyhow::Result<()> {
+        let cmd = self.protocol.recv()?;
+        self.execute_command(cmd)
+    }
+
+    /// Process all available commands.
+    pub fn recv_all_commands(&mut self) -> anyhow::Result<()> {
+        while let Some(cmd) = self.protocol.try_recv()? {
+            self.execute_command(cmd)?;
+        }
+        Ok(())
+    }
+
+    /// Process a command.
+    pub fn execute_command(&mut self, cmd: Command) -> anyhow::Result<()> {
+        match cmd {
+            Command::Handshake { .. } => unreachable!(),
+            Command::Touch { pos, event } => todo!(),
+            Command::ControllerUpdate(update) => {
+                // FIXME: also updating partner controller
+                // FIXME: allow removing controllers
+                self.inputs.set_controller(0, Some(update))?;
+            }
+            Command::USD { root } => todo!(),
+            Command::VEXLinkOpened { port, mode } => todo!(),
+            Command::VEXLinkClosed { port } => todo!(),
+            Command::CompetitionMode {
+                connected,
+                mode,
+                is_competition,
+            } => {
+                self.competition_mode = CompetitionMode {
+                    enabled: true, // FIXME: allow different enabled values
+                    mode,
+                    connected,
+                    is_competition,
+                };
+            }
+            Command::ConfigureDevice { port, device } => todo!(),
+            Command::AdiInput { port, voltage } => todo!(),
+            Command::StartExecution => {
+                if self.is_executing {
+                    bail!("Cannot start execution twice");
+                }
+
+                self.is_executing = true;
+            }
+            Command::SetBatteryCapacity { capacity } => todo!(),
+        }
+        Ok(())
+    }
+
+    /// Returns whether the simulator is in the execution phase.
+    pub fn executing(&self) -> bool {
+        self.is_executing
+    }
+
+    pub fn run_tasks(&mut self) -> anyhow::Result<()> {
+        self.recv_all_commands()?;
+        self.inputs.update()?;
+        Ok(())
     }
 }
 
@@ -103,7 +206,9 @@ impl JumpTable {
         );
 
         // vexTasksRun
-        builder.insert(0x05c, move || {});
+        builder.insert(0x05c, move |mut caller: Caller<'_, SdkState>| {
+            caller.data_mut().run_tasks()
+        });
 
         // vexSystemHighResTimeGet
         builder.insert(0x134, move |caller: Caller<'_, SdkState>| -> Result<u64> {
@@ -162,7 +267,7 @@ impl JumpTable {
                 &sdk_index.to_le_bytes(),
             )?;
         }
-        println!("Jump table exposed with {api_size} functions");
+        eprintln!("Jump table exposed with {api_size} functions");
         Ok(())
     }
 }

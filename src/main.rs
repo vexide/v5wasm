@@ -6,12 +6,15 @@ use clap::Parser as _;
 use fimg::pixels::convert::RGB;
 use fs_err as fs;
 
+use protocol::Protocol;
 use sdk::display::{BLACK, WHITE};
+use vexide_simulator_protocol::Event;
 use wasmparser::{Parser, Payload};
 use wasmtime::*;
 
 use crate::sdk::{JumpTable, SdkState};
 
+mod protocol;
 mod sdk;
 
 const HEADER_MAGIC: &[u8] = b"XVX5";
@@ -20,7 +23,7 @@ const HEADER_MAGIC: &[u8] = b"XVX5";
 ///
 /// In order to be simulated, robot code should be WebAssembly-formatted (`.wasm`
 /// file) and contain a V5 code signature in a custom section named `.cold_magic`.
-/// Programs may utilize the VEX V5 jumptable to interact with simulated subsystems.
+/// Programs may utilize the VEX V5 jump table to interact with simulated subsystems.
 ///
 /// A WASI environment is not provided.
 #[derive(Debug, clap::Parser)]
@@ -73,7 +76,7 @@ fn load_program(engine: &Engine, path: &Path) -> Result<(Module, ProgramOptions)
 
     let program = fs::read(path)?;
 
-    // in Vexide programs the cold header is stored in a section called ".cold_magic"
+    // in vexide programs the cold header is stored in a section called ".cold_magic"
     let mut cold_header = None;
     let parser = Parser::new(0);
     for payload in parser.parse_all(&program) {
@@ -126,6 +129,9 @@ fn main() -> Result<()> {
     // video subsystem enabled:
     sdl2::hint::set("SDL_JOYSTICK_THREAD", "1");
 
+    let mut protocol = Protocol::open();
+    protocol.handshake()?;
+
     eprintln!("Compiling...");
     let engine = Engine::new(
         Config::new()
@@ -137,7 +143,7 @@ fn main() -> Result<()> {
 
     eprintln!("Booting...");
 
-    let state = SdkState::new(module.clone(), cold_header);
+    let state = SdkState::new(module.clone(), cold_header, protocol);
 
     let mut store = Store::new(&engine, state);
 
@@ -153,8 +159,6 @@ fn main() -> Result<()> {
         .next()
         .unwrap();
 
-    // First set up our linker which is going to be linking modules together. We
-    // want our linker to have wasi available, so we set that up here as well.
     let mut linker = Linker::new(&engine);
     let table = Table::new(&mut store, imported_table_ty, Ref::Func(None))?;
     linker.define(&store, "env", "__indirect_function_table", table)?;
@@ -163,7 +167,7 @@ fn main() -> Result<()> {
         "sim_log_backtrace",
         |caller: Caller<'_, SdkState>| {
             let backtrace = WasmBacktrace::capture(caller);
-            println!("{}", backtrace);
+            eprintln!("{}", backtrace);
             Ok(())
         },
     )?;
@@ -179,12 +183,13 @@ fn main() -> Result<()> {
     memory.grow(&mut store, target_pages - memory_size)?;
 
     // Add the jump table to memory and create the WASM FFI interface.
-    let sdk = JumpTable::new(&mut store, memory);
-    sdk.expose(&mut store, &table, &memory)?;
+    let jump_table = JumpTable::new(&mut store, memory);
+    jump_table.expose(&mut store, &table, &memory)?;
 
+    let run = instance.get_typed_func::<(), ()>(&mut store, "_entry")?;
+    store.data_mut().setup()?;
     // We should be ready to actually run the entrypoint now.
     eprintln!("_entry()");
-    let run = instance.get_typed_func::<(), ()>(&mut store, "_entry")?;
     run.call(&mut store, ())?;
 
     Ok(())

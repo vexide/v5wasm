@@ -1,8 +1,12 @@
-use anyhow::Context;
+use std::ffi::NulError;
+
+use anyhow::{anyhow, Context};
 use sdl2::{
     controller::{Axis, Button, GameController},
-    EventPump, GameControllerSubsystem,
+    joystick::Guid,
+    EventPump, GameControllerSubsystem, JoystickSubsystem, Sdl,
 };
+use vexide_simulator_protocol::{ControllerState, ControllerUpdate};
 use wasmtime::*;
 
 use crate::sdk::SdkState;
@@ -94,36 +98,39 @@ pub fn build_controller_jump_table(memory: Memory, builder: &mut JumpTableBuilde
         move |mut caller: Caller<'_, SdkState>, id: u32, index: u32| -> Result<i32> {
             let index = V5_ControllerIndex(index);
 
-            caller.data_mut().inputs.update();
-            let states = caller
-                .data()
+            let controller = caller
+                .data_mut()
                 .inputs
-                .states
-                .get(id as usize)
+                .controller(id, false)
                 .context("Invalid controller id")?;
-            match index {
-                V5_ControllerIndex::AnaLeftX => Ok(states.axis1),
-                V5_ControllerIndex::AnaLeftY => Ok(states.axis2),
-                V5_ControllerIndex::AnaRightX => Ok(states.axis4),
-                V5_ControllerIndex::AnaRightY => Ok(states.axis3),
-                V5_ControllerIndex::ButtonL1 => Ok(states.button_l1 as i32),
-                V5_ControllerIndex::ButtonL2 => Ok(states.button_l2 as i32),
-                V5_ControllerIndex::ButtonR1 => Ok(states.button_r1 as i32),
-                V5_ControllerIndex::ButtonR2 => Ok(states.button_r2 as i32),
-                V5_ControllerIndex::ButtonUp => Ok(states.button_up as i32),
-                V5_ControllerIndex::ButtonDown => Ok(states.button_down as i32),
-                V5_ControllerIndex::ButtonLeft => Ok(states.button_left as i32),
-                V5_ControllerIndex::ButtonRight => Ok(states.button_right as i32),
-                V5_ControllerIndex::ButtonX => Ok(states.button_x as i32),
-                V5_ControllerIndex::ButtonB => Ok(states.button_b as i32),
-                V5_ControllerIndex::ButtonY => Ok(states.button_y as i32),
-                V5_ControllerIndex::ButtonA => Ok(states.button_a as i32),
-                V5_ControllerIndex::ButtonSEL => Ok(states.button_sel as i32),
-                V5_ControllerIndex::BatteryLevel => Ok(states.battery_level),
-                V5_ControllerIndex::ButtonAll => Ok(states.button_all as i32),
-                V5_ControllerIndex::Flags => Ok(states.flags),
-                V5_ControllerIndex::BatteryCapacity => Ok(states.battery_capacity),
-                _ => anyhow::bail!("Invalid controller index"),
+            if let Some(controller) = controller {
+                let states = controller.current_state;
+                match index {
+                    V5_ControllerIndex::AnaLeftX => Ok(states.axis1),
+                    V5_ControllerIndex::AnaLeftY => Ok(states.axis2),
+                    V5_ControllerIndex::AnaRightX => Ok(states.axis4),
+                    V5_ControllerIndex::AnaRightY => Ok(states.axis3),
+                    V5_ControllerIndex::ButtonL1 => Ok(states.button_l1 as i32),
+                    V5_ControllerIndex::ButtonL2 => Ok(states.button_l2 as i32),
+                    V5_ControllerIndex::ButtonR1 => Ok(states.button_r1 as i32),
+                    V5_ControllerIndex::ButtonR2 => Ok(states.button_r2 as i32),
+                    V5_ControllerIndex::ButtonUp => Ok(states.button_up as i32),
+                    V5_ControllerIndex::ButtonDown => Ok(states.button_down as i32),
+                    V5_ControllerIndex::ButtonLeft => Ok(states.button_left as i32),
+                    V5_ControllerIndex::ButtonRight => Ok(states.button_right as i32),
+                    V5_ControllerIndex::ButtonX => Ok(states.button_x as i32),
+                    V5_ControllerIndex::ButtonB => Ok(states.button_b as i32),
+                    V5_ControllerIndex::ButtonY => Ok(states.button_y as i32),
+                    V5_ControllerIndex::ButtonA => Ok(states.button_a as i32),
+                    V5_ControllerIndex::ButtonSEL => Ok(states.button_sel as i32),
+                    V5_ControllerIndex::BatteryLevel => Ok(states.battery_level),
+                    V5_ControllerIndex::ButtonAll => Ok(states.button_all as i32),
+                    V5_ControllerIndex::Flags => Ok(states.flags),
+                    V5_ControllerIndex::BatteryCapacity => Ok(states.battery_capacity),
+                    _ => anyhow::bail!("Invalid controller index"),
+                }
+            } else {
+                Ok(0)
             }
         },
     );
@@ -132,7 +139,6 @@ pub fn build_controller_jump_table(memory: Memory, builder: &mut JumpTableBuilde
     builder.insert(
         0x1a8,
         move |mut caller: Caller<'_, SdkState>, id: u32| -> Result<i32> {
-            caller.data_mut().inputs.update();
             caller.data_mut().inputs.connected(id).map(|c| c as i32)
         },
     );
@@ -140,125 +146,203 @@ pub fn build_controller_jump_table(memory: Memory, builder: &mut JumpTableBuilde
 
 // MARK: API
 
-#[derive(Debug, Default)]
-struct ControllerState {
-    axis1: i32,
-    axis2: i32,
-    axis3: i32,
-    axis4: i32,
-    button_l1: bool,
-    button_l2: bool,
-    button_r1: bool,
-    button_r2: bool,
-    button_up: bool,
-    button_down: bool,
-    button_left: bool,
-    button_right: bool,
-    button_x: bool,
-    button_b: bool,
-    button_y: bool,
-    button_a: bool,
-    button_sel: bool,
-    battery_level: i32,
-    button_all: bool,
-    flags: i32,
-    battery_capacity: i32,
+pub struct V5Controller {
+    pub current_state: ControllerState,
+    pub sdl_guid: Option<Guid>,
+    pub sdl_controller: Option<GameController>,
 }
 
 pub struct Inputs {
-    states: [ControllerState; 2],
-    subsystem: GameControllerSubsystem,
+    controllers: [Option<V5Controller>; 2],
+    controller_subsystem: GameControllerSubsystem,
+    joystick_subsystem: JoystickSubsystem,
     event_pump: EventPump,
-    /// The connected game controllers in the order `[Primary, Secondary]`.
-    game_controllers: [Option<GameController>; 2],
 }
 
 impl Inputs {
-    pub fn new(subsystem: GameControllerSubsystem) -> Self {
+    pub fn new(sdl: Sdl) -> Self {
         Inputs {
-            states: Default::default(),
-            event_pump: subsystem.sdl().event_pump().unwrap(),
-            subsystem,
-            game_controllers: Default::default(),
+            controllers: Default::default(),
+            event_pump: sdl.event_pump().unwrap(),
+            joystick_subsystem: sdl.joystick().unwrap(),
+            controller_subsystem: sdl.game_controller().unwrap(),
         }
+    }
+
+    pub fn set_controller(
+        &mut self,
+        id: u32,
+        update: Option<ControllerUpdate>,
+    ) -> Result<(), Error> {
+        assert!(
+            id < self.controllers.len() as u32,
+            "Invalid controller index"
+        );
+
+        match update {
+            Some(update) => {
+                let controller = match update {
+                    ControllerUpdate::Raw(state) => V5Controller {
+                        current_state: state,
+                        sdl_controller: None,
+                        sdl_guid: None,
+                    },
+                    ControllerUpdate::UUID(uuid) => V5Controller {
+                        // TODO: use Default::default()
+                        current_state: ControllerState {
+                            axis1: 0,
+                            axis2: 0,
+                            axis3: 0,
+                            axis4: 0,
+                            button_l1: false,
+                            button_l2: false,
+                            button_r1: false,
+                            button_r2: false,
+                            button_up: false,
+                            button_down: false,
+                            button_left: false,
+                            button_right: false,
+                            button_x: false,
+                            button_b: false,
+                            button_y: false,
+                            button_a: false,
+                            button_sel: false,
+                            battery_level: 0,
+                            button_all: false,
+                            flags: 0,
+                            battery_capacity: 0,
+                        },
+                        sdl_controller: None,
+                        sdl_guid: Some(Guid::from_string(&uuid)?),
+                    },
+                };
+                self.controllers[id as usize] = Some(controller);
+            }
+            None => {
+                self.controllers[id as usize] = None;
+            }
+        }
+
+        Ok(())
     }
 
     /// Returns whether the controller with the given id is connected.
     ///
     /// Fails if the id is invalid.
     pub fn connected(&mut self, id: u32) -> Result<bool> {
-        if id >= self.game_controllers.len() as u32 {
+        Ok(self.controller(id, false)?.is_some())
+    }
+
+    // /// Find a suitable game controller for the given index.
+    // fn find_suitable_controller_id(&self, mut id: usize) -> Option<GameController> {
+    //     for index in 0..self.subsystem.num_joysticks().ok()? {
+    //         if self.subsystem.is_game_controller(index) {
+    //             let Ok(controller) = self.subsystem.open(index) else {
+    //                 continue;
+    //             };
+    //             if !controller.attached() {
+    //                 continue;
+    //             }
+    //             if id == 0 {
+    //                 return Some(controller);
+    //             } else {
+    //                 id -= 1;
+    //             }
+    //         }
+    //     }
+    //     None
+    // }
+
+    /// Get the connected controller for the given index, or try to connect a new one if it is not connected.
+    pub fn controller(&mut self, id: u32, discover: bool) -> Result<Option<&mut V5Controller>> {
+        if id >= self.controllers.len() as u32 {
             anyhow::bail!("Invalid controller id")
         }
 
-        Ok(self.controller(id as usize).is_some())
-    }
-
-    /// Find a suitable game controller for the given index.
-    fn find_suitable_controller_id(&self, mut id: usize) -> Option<GameController> {
-        for index in 0..self.subsystem.num_joysticks().ok()? {
-            if self.subsystem.is_game_controller(index) {
-                let Ok(controller) = self.subsystem.open(index) else {
-                    continue;
-                };
-                if !controller.attached() {
-                    continue;
-                }
-                if id == 0 {
-                    return Some(controller);
+        let Some(controller) = self.controllers[id as usize].as_mut() else {
+            return Ok(None);
+        };
+        if let Some(guid) = &controller.sdl_guid {
+            // If the frontend provided a controller ID, the sim controller is only connected if the physical controller it refers to is connected.
+            if let Some(sdl_controller) = &mut controller.sdl_controller {
+                if sdl_controller.attached() {
+                    return Ok(Some(controller));
                 } else {
-                    id -= 1;
+                    controller.sdl_controller = None;
                 }
             }
-        }
-        None
-    }
 
-    /// Get the connected controller for the given index, or try to connect a new one if it is not connected.
-    fn controller(&mut self, index: usize) -> Option<(&mut GameController, &mut ControllerState)> {
-        if self.game_controllers[index]
-            .as_ref()
-            .map_or(true, |c| !c.attached())
-        {
-            self.game_controllers[index] = self.find_suitable_controller_id(index);
+            // At this point the SDL controller isn't valid so we try and discover one with that GUID.
+            if discover {
+                let joysticks = self
+                    .controller_subsystem
+                    .num_joysticks()
+                    .map_err(|s| anyhow!(s))?;
+                for idx in 0..joysticks {
+                    if self.controller_subsystem.is_game_controller(idx) {
+                        let Ok(joystick) = self.joystick_subsystem.open(idx) else {
+                            continue;
+                        };
+                        if &joystick.guid() != guid || !joystick.attached() {
+                            continue;
+                        }
+                        let Ok(sdl_controller) = self.controller_subsystem.open(idx) else {
+                            continue;
+                        };
+
+                        controller.sdl_controller = Some(sdl_controller);
+                        return Ok(Some(controller));
+                    }
+                }
+            }
+
+            Ok(None)
+        } else {
+            // The frontend didn't provide a controller ID for updating it so we're just left with a constant controller state.
+            Ok(Some(controller))
         }
-        self.game_controllers[index]
-            .as_mut()
-            .and_then(|c| c.attached().then_some(c))
-            .map(|c| (c, &mut self.states[index]))
     }
 
     /// Get new events from the SDL event pump and update the SDK's representation of the controller states.
-    pub fn update(&mut self) {
+    pub fn update(&mut self) -> anyhow::Result<()> {
         self.event_pump.pump_events();
 
-        for index in 0..self.game_controllers.len() {
-            let controller = self.controller(index);
-            if let Some((controller, state)) = controller {
-                state.axis1 = (controller.axis(Axis::LeftX) as i32) * 127 / (i16::MAX as i32);
-                state.axis2 = -(controller.axis(Axis::LeftY) as i32) * 127 / (i16::MAX as i32);
-                state.axis3 = -(controller.axis(Axis::RightY) as i32) * 127 / (i16::MAX as i32);
-                state.axis4 = (controller.axis(Axis::RightX) as i32) * 127 / (i16::MAX as i32);
-                state.button_l1 = controller.button(Button::LeftShoulder);
-                state.button_l2 = controller.axis(Axis::TriggerLeft) > 0;
-                state.button_r1 = controller.button(Button::RightShoulder);
-                state.button_r2 = controller.axis(Axis::TriggerRight) > 0;
-                state.button_up = controller.button(Button::DPadUp);
-                state.button_down = controller.button(Button::DPadDown);
-                state.button_left = controller.button(Button::DPadLeft);
-                state.button_right = controller.button(Button::DPadRight);
-                state.button_x = controller.button(Button::X);
-                state.button_b = controller.button(Button::B);
-                state.button_y = controller.button(Button::Y);
-                state.button_a = controller.button(Button::A);
+        for index in 0..self.controllers.len() {
+            if let Some(controller) = self.controller(index as u32, true)? {
+                if let Some(sdl_controller) = &controller.sdl_controller {
+                    controller.current_state.axis1 =
+                        (sdl_controller.axis(Axis::LeftX) as i32) * 127 / (i16::MAX as i32);
+                    controller.current_state.axis2 =
+                        -(sdl_controller.axis(Axis::LeftY) as i32) * 127 / (i16::MAX as i32);
+                    controller.current_state.axis3 =
+                        -(sdl_controller.axis(Axis::RightY) as i32) * 127 / (i16::MAX as i32);
+                    controller.current_state.axis4 =
+                        (sdl_controller.axis(Axis::RightX) as i32) * 127 / (i16::MAX as i32);
+                    controller.current_state.button_l1 =
+                        sdl_controller.button(Button::LeftShoulder);
+                    controller.current_state.button_l2 = sdl_controller.axis(Axis::TriggerLeft) > 0;
+                    controller.current_state.button_r1 =
+                        sdl_controller.button(Button::RightShoulder);
+                    controller.current_state.button_r2 =
+                        sdl_controller.axis(Axis::TriggerRight) > 0;
+                    controller.current_state.button_up = sdl_controller.button(Button::DPadUp);
+                    controller.current_state.button_down = sdl_controller.button(Button::DPadDown);
+                    controller.current_state.button_left = sdl_controller.button(Button::DPadLeft);
+                    controller.current_state.button_right =
+                        sdl_controller.button(Button::DPadRight);
+                    controller.current_state.button_x = sdl_controller.button(Button::X);
+                    controller.current_state.button_b = sdl_controller.button(Button::B);
+                    controller.current_state.button_y = sdl_controller.button(Button::Y);
+                    controller.current_state.button_a = sdl_controller.button(Button::A);
+                }
                 // self.states[index].button_sel = controller.button(Button::Start);
                 // self.states[index].battery_level =
                 // self.states[index].button_all =
                 // self.states[index].flags =
                 // self.states[index].battery_capacity =
-            } else {
-                self.states[index] = Default::default();
             }
         }
+
+        Ok(())
     }
 }

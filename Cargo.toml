@@ -11,10 +11,13 @@ clap = { version = "4.5.4", features = ["derive"] }
 ctrlc = "3.4.4"
 fimg = { version = "0.4.41", features = ["save"], default-features = false }
 fs-err = "2.11.0"
+jsonl = "4.0.1"
 resource = "0.5.0"
 rusttype = "0.9.3"
 sdl2 = { version = "0.36.0", features = ["bundled", "static-link"] }
 single_value_channel = "1.2.2"
+snafu = "0.8.3"
+vexide-simulator-protocol = "0.1.0"
 wasmparser = "0.208.1"
 wasmtime = { version = "21.0.1", default-features = false, features = [
     "std",
