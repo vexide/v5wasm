@@ -1034,6 +1034,7 @@ name = "vex-sdk-sim"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "base64",
  "bitflags 2.5.0",
  "bytes",
  "clap",
@@ -1054,8 +1055,7 @@ dependencies = [
 [[package]]
 name = "vexide-simulator-protocol"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bae587579a39b4439ff3871da4164aa0ae4dd106c03542bac69d7786f308870"
+source = "git+https://github.com/vexide/simulator-protocol.git#8ced1e9e34366203a3c0296722571aa6b156f191"
 dependencies = [
  "base64",
  "serde",

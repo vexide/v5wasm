@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.82"
+base64 = "0.22.1"
 bitflags = "2.5.0"
 bytes = "1.6.0"
 clap = { version = "4.5.4", features = ["derive"] }
@@ -17,7 +18,7 @@ rusttype = "0.9.3"
 sdl2 = { version = "0.36.0", features = ["bundled", "static-link"] }
 single_value_channel = "1.2.2"
 snafu = "0.8.3"
-vexide-simulator-protocol = "0.1.0"
+vexide-simulator-protocol = { git = "https://github.com/vexide/simulator-protocol.git", version = "0.1.0" }
 wasmparser = "0.208.1"
 wasmtime = { version = "21.0.1", default-features = false, features = [
     "std",

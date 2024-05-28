@@ -8,13 +8,14 @@ use std::{
 };
 
 use anyhow::Context;
+use base64::prelude::*;
 use fimg::{pixels::convert::RGB, Image, Pack};
 use resource::{resource, Resource};
-use rusttype::{point, Font, Point, PositionedGlyph, Rect, Scale};
 use single_value_channel::{channel_starting_with, Receiver, Updater};
+use vexide_simulator_protocol::{Color, DrawCommand, Event, Point};
 use wasmtime::*;
 
-use crate::ProgramOptions;
+use crate::{protocol::Protocol, ProgramOptions};
 
 use super::{clone_c_string, JumpTableBuilder, MemoryExt, SdkState};
 
@@ -392,142 +393,47 @@ type Canvas = Image<Box<[u8]>, 3>;
 
 pub struct Display {
     /// The display's saved foreground color.
-    pub foreground_color: RGB,
+    pub foreground_color: Color,
     /// The display's saved background color.
-    pub background_color: RGB,
-    /// The display's image buffer.
-    pub canvas: Canvas,
-    user_mono: Font<'static>,
-    /// Font for the program header's timer.
-    timer_mono: Font<'static>,
-    program_options: ProgramOptions,
-    /// Controls when the display is rendered.
-    render_mode: RenderMode,
+    pub background_color: Color,
     /// Cache for text layout calculations, to avoid re-calculating the same text layout multiple times in a row.
-    text_layout_cache: Cell<Option<(String, TextOptions, Vec<PositionedGlyph<'static>>)>>,
-    /// Will be None if this is the render thread's direct display, which instead of "rendering"
-    /// by sending the buffer to another thread, simply shows the display to the user.
-    render_tx: Option<Updater<Option<Canvas>>>,
-    /// The instant at which the program started.
-    start_instant: Instant,
-}
-
-impl Deref for Display {
-    type Target = Image<Box<[u8]>, 3>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.canvas
-    }
-}
-
-impl DerefMut for Display {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.canvas
-    }
+    text_layout_cache: Option<(String, TextOptions, Vec<PositionedGlyph<'static>>)>,
 }
 
 impl Display {
-    pub fn new(program_options: ProgramOptions, start_instant: Instant) -> Self {
-        let canvas =
-            Image::build(DISPLAY_WIDTH, DISPLAY_HEIGHT).fill(program_options.default_bg_color());
-        let user_mono =
-            Font::try_from_vec(resource!("/fonts/NotoMono-Regular.ttf").to_vec()).unwrap();
-        let timer_mono =
-            Font::try_from_vec(resource!("/fonts/droid-sans-mono.ttf").to_vec()).unwrap();
-
-        // Start the off-thread renderer to update the timer even while the main thread is blocked.
-        let (rx, tx) = channel_starting_with(None);
-        Self::start_render_thread(
-            Self {
-                foreground_color: program_options.default_fg_color(),
-                background_color: program_options.default_bg_color(),
-                user_mono: user_mono.clone(),
-                timer_mono: timer_mono.clone(),
-                canvas: canvas.clone(),
-                program_options,
-                render_mode: RenderMode::DoubleBuffered,
-                text_layout_cache: Cell::default(),
-                render_tx: None,
-                start_instant,
-            },
-            rx,
-        );
-
+    pub fn new(program_options: ProgramOptions) -> Self {
         Self {
             foreground_color: program_options.default_fg_color(),
             background_color: program_options.default_bg_color(),
-            user_mono,
-            timer_mono,
-            canvas,
-            program_options,
-            render_mode: RenderMode::default(),
-            text_layout_cache: Cell::default(),
-            render_tx: Some(tx),
-            start_instant,
-        }
-    }
-
-    /// Starts the render thread, which renders the program header and handles showing the display to the user.
-    fn start_render_thread(mut direct_display: Self, mut rx: Receiver<Option<Canvas>>) {
-        spawn(move || {
-            // Pretty much a copy of the normal display, but it never calls render().
-            // Controls whether the display should be re-rendered. None or >1s ago will always re-render.
-            let mut last_update = None::<Instant>;
-
-            while !rx.has_no_updater() {
-                // If there's a new frame, render that instead.
-                if let Some(canvas) = rx.latest_mut().take() {
-                    direct_display.canvas = canvas;
-                    last_update = None;
-                }
-
-                // No need to re-render unless we have a new frame or should update the timer.
-                if last_update.map_or(true, |last| last.elapsed() > Duration::from_secs(1)) {
-                    direct_display.draw_header();
-                    direct_display.save("display.png");
-                    last_update = Some(Instant::now());
-                }
-
-                // FPS goal
-                sleep(Duration::from_secs_f64(1.0 / 10.0));
-            }
-        });
-    }
-
-    /// Returns the font data for the given font family.
-    fn font_family(&self, family: FontFamily) -> &Font<'static> {
-        match family {
-            FontFamily::UserMono => &self.user_mono,
-            FontFamily::TimerMono => &self.timer_mono,
+            text_layout_cache: None,
         }
     }
 
     /// Copies a buffer of pixels to the display.
     fn draw_buffer(
         &mut self,
+        protocol: &mut Protocol,
         buf: &[u8],
         top_left: (i32, i32),
         bot_right: (i32, i32),
         stride: u32,
     ) {
-        let mut y = top_left.1;
-        for row in buf.chunks((stride * 4) as usize) {
-            if y > bot_right.1 {
-                break;
-            }
-
-            let mut x = top_left.0;
-            for pixel in row.chunks(4) {
-                let color = RGB::unpack(u32::from_le_bytes(pixel[0..4].try_into().unwrap()));
-                if x >= 0 && x < self.width() as i32 && y >= 0 && y < self.height() as i32 {
-                    // I didn't see a safe version of this...?
-                    // SAFETY: bounds are checked
-                    unsafe { self.set_pixel(x.try_into().unwrap(), y.try_into().unwrap(), color) };
-                }
-                x += 1;
-            }
-            y += 1;
-        }
+        let buffer = BASE64_STANDARD.encode(buf);
+        protocol.send(&Event::ScreenDraw {
+            command: DrawCommand::CopyBuffer {
+                top_left: Point {
+                    x: top_left.0,
+                    y: top_left.1,
+                },
+                bottom_right: Point {
+                    x: bot_right.0,
+                    y: bot_right.1,
+                },
+                stride: stride,
+                buffer,
+            },
+            color: self.foreground_color,
+        })?;
     }
 
     /// Draws the blue program header at the top of the display.

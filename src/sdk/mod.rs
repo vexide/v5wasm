@@ -1,4 +1,8 @@
-use std::{collections::HashMap, ffi::CStr, time::Instant};
+use std::{
+    collections::{HashMap, VecDeque},
+    ffi::CStr,
+    time::Instant,
+};
 
 use anyhow::bail;
 use bitflags::bitflags;
@@ -48,6 +52,7 @@ pub struct SdkState {
     competition_mode: CompetitionMode,
     protocol: Protocol,
     is_executing: bool,
+    command_process_queue: VecDeque<Command>,
 }
 
 impl SdkState {
@@ -63,6 +68,7 @@ impl SdkState {
             competition_mode: CompetitionMode::default(),
             protocol,
             is_executing: false,
+            command_process_queue: VecDeque::default(),
         }
     }
 
@@ -77,14 +83,35 @@ impl SdkState {
 
     /// Process the next command, blocking if it hasn't been received yet.
     pub fn recv_command(&mut self) -> anyhow::Result<()> {
-        let cmd = self.protocol.recv()?;
+        let cmd = self
+            .command_process_queue
+            .pop_front()
+            .map_or_else(|| self.protocol.recv(), Ok)?;
         self.execute_command(cmd)
     }
 
     /// Process all available commands.
     pub fn recv_all_commands(&mut self) -> anyhow::Result<()> {
-        while let Some(cmd) = self.protocol.try_recv()? {
+        while let Some(cmd) = self
+            .command_process_queue
+            .pop_front()
+            .map_or_else(|| self.protocol.try_recv(), |x| Ok(Some(x)))?
+        {
             self.execute_command(cmd)?;
+        }
+        Ok(())
+    }
+
+    /// Blocks until a command has been received that satisfies the condition, then executes the command.
+    pub fn wait_for_command(&mut self, check: impl Fn(&Command) -> bool) -> anyhow::Result<()> {
+        loop {
+            let cmd = self.protocol.recv()?;
+            if check(&cmd) {
+                self.execute_command(cmd);
+                break;
+            } else {
+                self.command_process_queue.push_back(cmd);
+            }
         }
         Ok(())
     }
@@ -94,21 +121,21 @@ impl SdkState {
         match cmd {
             Command::Handshake { .. } => unreachable!(),
             Command::Touch { pos, event } => todo!(),
-            Command::ControllerUpdate(update) => {
-                // FIXME: also updating partner controller
-                // FIXME: allow removing controllers
-                self.inputs.set_controller(0, Some(update))?;
+            Command::ControllerUpdate(primary, partner) => {
+                self.inputs.set_controller(0, primary)?;
+                self.inputs.set_controller(1, partner)?;
             }
             Command::USD { root } => todo!(),
             Command::VEXLinkOpened { port, mode } => todo!(),
             Command::VEXLinkClosed { port } => todo!(),
             Command::CompetitionMode {
+                enabled,
                 connected,
                 mode,
                 is_competition,
             } => {
                 self.competition_mode = CompetitionMode {
-                    enabled: true, // FIXME: allow different enabled values
+                    enabled,
                     mode,
                     connected,
                     is_competition,
@@ -124,6 +151,11 @@ impl SdkState {
                 self.is_executing = true;
             }
             Command::SetBatteryCapacity { capacity } => todo!(),
+            Command::SetTextMetrics {
+                text,
+                options,
+                metrics,
+            } => {}
         }
         Ok(())
     }
