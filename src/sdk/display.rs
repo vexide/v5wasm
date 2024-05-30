@@ -391,7 +391,7 @@ impl<'a> DisplayCtx<'a> {
             ctx.draw(
                 Shape::Rectangle {
                     top_left: [0, 0].into(),
-                    bottom_right: [DISPLAY_WIDTH as i32, HEADER_HEIGHT as i32].into(),
+                    bottom_right: [DISPLAY_WIDTH, HEADER_HEIGHT].into(),
                 },
                 false,
             )
@@ -435,7 +435,7 @@ impl<'a> DisplayCtx<'a> {
                 ctx.draw(
                     Shape::Rectangle {
                         top_left: [0, 0].into(),
-                        bottom_right: [DISPLAY_WIDTH as i32, DISPLAY_HEIGHT as i32].into(),
+                        bottom_right: [DISPLAY_WIDTH, DISPLAY_HEIGHT].into(),
                     },
                     false,
                 )

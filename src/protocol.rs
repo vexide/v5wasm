@@ -1,11 +1,11 @@
 use std::{
     collections::VecDeque,
     io::{stdin, stdout, StdoutLock},
-    sync::mpsc::{self, RecvError, TryRecvError},
+    sync::mpsc::{self, TryRecvError},
 };
 
 use jsonl::ReadError;
-use snafu::{IntoError, OptionExt, ResultExt, Snafu};
+use snafu::{OptionExt, ResultExt, Snafu};
 use vexide_simulator_protocol::{Command, Event};
 
 #[derive(Debug, Snafu)]

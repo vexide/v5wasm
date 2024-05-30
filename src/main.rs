@@ -8,7 +8,6 @@ use fs_err as fs;
 use protocol::Protocol;
 use rgb::RGB8;
 use sdk::display::{BLACK, WHITE};
-use vexide_simulator_protocol::Event;
 use wasmparser::{Parser, Payload};
 use wasmtime::*;
 

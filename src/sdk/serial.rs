@@ -1,15 +1,7 @@
-use std::{
-    ffi::NulError,
-    io::{BufWriter, Cursor, Read, Seek, SeekFrom, Write},
-};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 use anyhow::{anyhow, Context};
-use sdl2::{
-    controller::{Axis, Button, GameController},
-    joystick::Guid,
-    EventPump, GameControllerSubsystem, JoystickSubsystem, Sdl,
-};
-use vexide_simulator_protocol::{ControllerState, ControllerUpdate, Event};
+use vexide_simulator_protocol::Event;
 use wasmtime::*;
 
 use crate::{protocol::Protocol, sdk::SdkState};

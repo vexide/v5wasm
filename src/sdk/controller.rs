@@ -1,5 +1,3 @@
-use std::ffi::NulError;
-
 use anyhow::{anyhow, Context};
 use sdl2::{
     controller::{Axis, Button, GameController},

@@ -1,8 +1,4 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    ffi::CStr,
-    time::Instant,
-};
+use std::{collections::HashMap, ffi::CStr, time::Instant};
 
 use anyhow::bail;
 use bitflags::bitflags;
@@ -11,10 +7,7 @@ use serial::{build_serial_jump_table, Serial};
 use vexide_simulator_protocol::{Command, CompMode, Event};
 use wasmtime::*;
 
-use crate::{
-    protocol::{Protocol, ProtocolError},
-    ProgramOptions,
-};
+use crate::{protocol::Protocol, ProgramOptions};
 
 use self::{
     controller::{build_controller_jump_table, Inputs},
