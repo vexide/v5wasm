@@ -7,6 +7,7 @@ use std::{
 use anyhow::bail;
 use bitflags::bitflags;
 
+use serial::{build_serial_jump_table, Serial};
 use vexide_simulator_protocol::{Command, CompMode, Event};
 use wasmtime::*;
 
@@ -22,6 +23,7 @@ use self::{
 
 mod controller;
 pub mod display;
+mod serial;
 
 #[derive(Debug)]
 pub struct CompetitionMode {
@@ -52,6 +54,7 @@ pub struct SdkState {
     competition_mode: CompetitionMode,
     protocol: Protocol,
     is_executing: bool,
+    serial: Serial,
 }
 
 impl SdkState {
@@ -67,6 +70,7 @@ impl SdkState {
             competition_mode: CompetitionMode::default(),
             protocol,
             is_executing: false,
+            serial: Serial::new(),
         }
     }
 
@@ -141,6 +145,7 @@ impl SdkState {
     pub fn run_tasks(&mut self) -> anyhow::Result<()> {
         self.recv_all_commands()?;
         self.inputs.update()?;
+        self.serial.flush(&mut self.protocol)?;
         Ok(())
     }
 }
@@ -191,24 +196,7 @@ impl JumpTable {
 
         build_display_jump_table(memory, &mut builder);
         build_controller_jump_table(memory, &mut builder);
-
-        // vexSerialWriteBuffer
-        builder.insert(
-            0x89c,
-            move |caller: Caller<'_, SdkState>,
-                  channel: i32,
-                  data: i32,
-                  data_len: i32|
-                  -> Result<i32> {
-                if channel == 1 {
-                    let data_bytes =
-                        memory.data(&caller)[data as usize..(data + data_len) as usize].to_vec();
-                    let data_str = String::from_utf8(data_bytes).unwrap();
-                    print!("{}", data_str);
-                }
-                Ok(data_len)
-            },
-        );
+        build_serial_jump_table(memory, &mut builder);
 
         // vexTasksRun
         builder.insert(0x05c, move |mut caller: Caller<'_, SdkState>| {
