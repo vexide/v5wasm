@@ -138,6 +138,9 @@ impl Serial {
     }
 
     pub fn flush(&mut self, protocol: &mut Protocol) -> Result<()> {
+        if self.stdout_buffer.position() == 0 {
+            return Ok(());
+        }
         let stdout = std::mem::replace(
             &mut self.stdout_buffer,
             Cursor::new([0; STDOUT_BUFFER_SIZE]),

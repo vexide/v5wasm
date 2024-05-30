@@ -201,9 +201,6 @@ impl JumpTable {
             Ok(caller.data().program_start.elapsed().as_micros() as u64)
         });
 
-        // vexSerialWriteFree
-        builder.insert(0x8ac, move |_channel: u32| -> Result<i32> { Ok(2048) });
-
         // vexSystemExitRequest
         builder.insert(0x130, move || {
             std::process::exit(0);

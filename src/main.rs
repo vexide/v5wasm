@@ -8,6 +8,7 @@ use fs_err as fs;
 use protocol::Protocol;
 use rgb::RGB8;
 use sdk::display::{BLACK, WHITE};
+use vexide_simulator_protocol::{Event, VCodeSig};
 use wasmparser::{Parser, Payload};
 use wasmtime::*;
 
@@ -68,7 +69,11 @@ impl ProgramOptions {
 }
 
 /// Loads a user program from a file, parsing the cold header and creating a module.
-fn load_program(engine: &Engine, path: &Path) -> Result<(Module, ProgramOptions)> {
+fn load_program(
+    engine: &Engine,
+    path: &Path,
+    protocol: &mut Protocol,
+) -> Result<(Module, ProgramOptions)> {
     const PROGRAM_OPTIONS_INVERT_DEFAULT_GRAPHICS_COLORS: u32 = 1 << 0;
     const PROGRAM_OPTIONS_KILL_THREADS_WHEN_MAIN_EXITS: u32 = 1 << 1;
     const PROGRAM_OPTIONS_INVERT_GRAPHICS_BASED_ON_THEME: u32 = 1 << 2;
@@ -92,10 +97,13 @@ fn load_program(engine: &Engine, path: &Path) -> Result<(Module, ProgramOptions)
         .unwrap();
 
     // copy_to_bytes is used to remove the magic number from the start of the buffer
+    let v_code_sig = VCodeSig::new(&cold_header);
     let magic = cold_header.copy_to_bytes(HEADER_MAGIC.len());
     if magic != HEADER_MAGIC {
         return Err(anyhow::anyhow!("Invalid magic number"));
     }
+
+    protocol.send(&Event::VCodeSig(v_code_sig))?;
 
     // Parse the rest of the options, these are all the ones found in the public SDK
     let program_type = cold_header.get_u32_le();
@@ -137,8 +145,8 @@ fn main() -> Result<()> {
             .debug_info(true)
             .wasm_backtrace_details(WasmBacktraceDetails::Enable),
     )?;
-    let (module, cold_header) =
-        load_program(&engine, &args.program).context("Failed to load robot program")?;
+    let (module, cold_header) = load_program(&engine, &args.program, &mut protocol)
+        .context("Failed to load robot program")?;
 
     eprintln!("Booting...");
 
