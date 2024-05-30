@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io::{stdin, stdout, StdoutLock},
     sync::mpsc::{self, RecvError, TryRecvError},
 };
@@ -34,6 +35,7 @@ pub struct Protocol {
     handshake_finished: bool,
     outbound: StdoutLock<'static>,
     pub inbound: mpsc::Receiver<Result<Command, jsonl::ReadError>>,
+    command_process_queue: VecDeque<Command>,
 }
 
 impl Protocol {
@@ -57,11 +59,20 @@ impl Protocol {
             handshake_finished: false,
             outbound: stdout_lock,
             inbound: rx,
+            command_process_queue: VecDeque::new(),
         }
     }
 
     pub fn send(&mut self, event: &Event) -> Result<()> {
         Ok(jsonl::write(&mut self.outbound, event)?)
+    }
+
+    pub fn try_next(&mut self) -> Result<Option<Command>> {
+        let cmd = self
+            .command_process_queue
+            .pop_front()
+            .map_or_else(|| self.try_recv(), |x| Ok(Some(x)))?;
+        Ok(cmd)
     }
 
     pub fn try_recv(&mut self) -> Result<Option<Command>> {
@@ -73,6 +84,14 @@ impl Protocol {
             Err(TryRecvError::Empty) => Ok(None),
             Err(_) => RecvWorkerStoppedSnafu.fail(),
         }
+    }
+
+    pub fn next(&mut self) -> Result<Command> {
+        let cmd = self
+            .command_process_queue
+            .pop_front()
+            .map_or_else(|| self.recv(), Ok)?;
+        Ok(cmd)
     }
 
     pub fn recv(&mut self) -> Result<Command> {
@@ -89,7 +108,7 @@ impl Protocol {
         }
         const COMPATIBLE_PROTOCOL_VERSION: i32 = 1;
 
-        let handshake = self.recv()?;
+        let handshake = self.next()?;
         let (version, _) = match handshake {
             Command::Handshake {
                 version,
@@ -114,5 +133,20 @@ impl Protocol {
         self.handshake_finished = true;
 
         Ok(())
+    }
+
+    /// Blocks until a command has been received that satisfies the condition, then executes the command.
+    pub fn wait_for_command(
+        &mut self,
+        check: impl Fn(&Command) -> bool,
+    ) -> anyhow::Result<Command> {
+        loop {
+            let cmd = self.recv()?;
+            if check(&cmd) {
+                return Ok(cmd);
+            } else {
+                self.command_process_queue.push_back(cmd);
+            }
+        }
     }
 }

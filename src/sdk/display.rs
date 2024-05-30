@@ -1,18 +1,16 @@
 use std::{
-    cell::Cell,
-    hash::DefaultHasher,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-    thread::{sleep, spawn},
+    num::NonZeroU16,
+    thread::sleep,
     time::{Duration, Instant},
 };
 
 use anyhow::Context;
 use base64::prelude::*;
-use fimg::{pixels::convert::RGB, Image, Pack};
-use resource::{resource, Resource};
-use single_value_channel::{channel_starting_with, Receiver, Updater};
-use vexide_simulator_protocol::{Color, DrawCommand, Event, Point};
+use mint::Point2;
+use rgb::RGB8;
+use vexide_simulator_protocol::{
+    Command, DrawCommand, Event, Shape, TextLocation, TextMetrics, V5FontFamily, V5FontSize, V5Text,
+};
 use wasmtime::*;
 
 use crate::{protocol::Protocol, ProgramOptions};
@@ -24,22 +22,35 @@ use super::{clone_c_string, JumpTableBuilder, MemoryExt, SdkState};
 pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) {
     // vexDisplayForegroundColor
     builder.insert(0x640, move |mut caller: Caller<'_, SdkState>, col: u32| {
-        caller.data_mut().display.foreground_color = RGB::unpack(col);
+        caller.data_mut().display.foreground_color = RGB8 {
+            r: (col >> 16) as u8,
+            g: (col >> 8) as u8,
+            b: col as u8,
+        };
     });
 
     // vexDisplayBackgroundColor
     builder.insert(0x644, move |mut caller: Caller<'_, SdkState>, col: u32| {
-        caller.data_mut().display.background_color = RGB::unpack(col);
+        caller.data_mut().display.background_color = RGB8 {
+            r: (col >> 16) as u8,
+            g: (col >> 8) as u8,
+            b: col as u8,
+        };
     });
 
     // vexDisplayRectDraw
     builder.insert(
         0x668,
         move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
-            caller
-                .data_mut()
-                .display
-                .draw(Path::Rect { x1, y1, x2, y2 }, true);
+            let sdk = caller.data_mut();
+            sdk.display.ctx(&mut sdk.protocol).draw(
+                Shape::Rectangle {
+                    top_left: [x1, y1].into(),
+                    bottom_right: [x2, y2].into(),
+                },
+                true,
+            )?;
+            Ok(())
         },
     );
 
@@ -47,10 +58,15 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x670,
         move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
-            caller
-                .data_mut()
-                .display
-                .draw(Path::Rect { x1, y1, x2, y2 }, false);
+            let sdk = caller.data_mut();
+            sdk.display.ctx(&mut sdk.protocol).draw(
+                Shape::Rectangle {
+                    top_left: [x1, y1].into(),
+                    bottom_right: [x2, y2].into(),
+                },
+                false,
+            )?;
+            Ok(())
         },
     );
 
@@ -58,10 +74,15 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x674,
         move |mut caller: Caller<'_, SdkState>, cx: i32, cy: i32, radius: i32| {
-            caller
-                .data_mut()
-                .display
-                .draw(Path::Circle { cx, cy, radius }, true);
+            let sdk = caller.data_mut();
+            sdk.display.ctx(&mut sdk.protocol).draw(
+                Shape::Circle {
+                    center: [cx, cy].into(),
+                    radius: radius as u16,
+                },
+                true,
+            )?;
+            Ok(())
         },
     );
 
@@ -69,10 +90,15 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x67c,
         move |mut caller: Caller<'_, SdkState>, cx: i32, cy: i32, radius: i32| {
-            caller
-                .data_mut()
-                .display
-                .draw(Path::Circle { cx, cy, radius }, false);
+            let sdk = caller.data_mut();
+            sdk.display.ctx(&mut sdk.protocol).draw(
+                Shape::Circle {
+                    center: [cx, cy].into(),
+                    radius: radius as u16,
+                },
+                false,
+            )?;
+            Ok(())
         },
     );
 
@@ -81,14 +107,18 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         0x6c0,
         move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
             let string = clone_c_string!(string_ptr as usize, from caller using memory)?;
-            let size = caller.data().display.calculate_string_size(
-                string,
-                TextOptions {
-                    font_type: FontType::Normal,
-                    ..Default::default()
-                },
-            );
-            Ok(size.x as u32)
+            let sdk = caller.data_mut();
+
+            let font_size = sdk.display.last_font_size;
+            let size = sdk
+                .display
+                .ctx(&mut sdk.protocol)
+                .get_text_metrics(V5Text {
+                    data: string,
+                    font_family: V5FontFamily::UserMono,
+                    font_size,
+                })?;
+            Ok(size.width as u32)
         },
     );
 
@@ -97,28 +127,47 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         0x6c4,
         move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
             let string = clone_c_string!(string_ptr as usize, from caller using memory)?;
-            let size = caller.data().display.calculate_string_size(
-                string,
-                TextOptions {
-                    font_type: FontType::Normal,
-                    ..Default::default()
-                },
-            );
-            Ok(size.y as u32)
+            let sdk = caller.data_mut();
+
+            let font_size = sdk.display.last_font_size;
+            let size = sdk
+                .display
+                .ctx(&mut sdk.protocol)
+                .get_text_metrics(V5Text {
+                    data: string,
+                    font_family: V5FontFamily::UserMono,
+                    font_size,
+                })?;
+            Ok(size.height as u32)
         },
     );
 
     // vexDisplayRender
     builder.insert(
         0x7a0,
-        move |mut caller: Caller<'_, SdkState>, _vsync_wait: i32, _run_scheduler: i32| {
-            caller.data_mut().display.render(true);
+        move |mut caller: Caller<'_, SdkState>, vsync_wait: i32, run_scheduler: i32| {
+            let sdk = caller.data_mut();
+            sdk.display.ctx(&mut sdk.protocol).render()?;
+            let vsync_finish = Instant::now() + Duration::from_secs_f64(1.0 / 60.0);
+            if vsync_wait != 0 {
+                while Instant::now() < vsync_finish {
+                    sleep(Duration::from_millis(1));
+                    if run_scheduler != 0 {
+                        sdk.recv_all_commands()?;
+                    }
+                }
+            }
+            Ok(())
         },
     );
 
     // vexDisplayDoubleBufferDisable
     builder.insert(0x7a4, move |mut caller: Caller<'_, SdkState>| {
-        caller.data_mut().display.disable_double_buffer();
+        let sdk = caller.data_mut();
+        sdk.display
+            .ctx(&mut sdk.protocol)
+            .set_double_buffered(false)?;
+        Ok(())
     });
 
     // vexDisplayVPrintf
@@ -132,12 +181,19 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               _args: u32|
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            caller.data_mut().display.write_text(
-                format,
-                (x_pos, y_pos),
+            let sdk = caller.data_mut();
+
+            sdk.display.ctx(&mut sdk.protocol).write(
+                V5Text {
+                    data: format,
+                    font_family: Default::default(),
+                    font_size: Default::default(),
+                },
+                TextLocation::Coordinates {
+                    point: [x_pos, y_pos].into(),
+                },
                 opaque == 0,
-                TextOptions::default(),
-            );
+            )?;
             Ok(())
         },
     );
@@ -151,12 +207,44 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               _args: u32|
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            caller.data_mut().display.write_text(
-                format,
-                TextLine(line_number).coords(),
-                false,
-                TextOptions::default(),
-            );
+            let sdk = caller.data_mut();
+
+            sdk.display.ctx(&mut sdk.protocol).write(
+                V5Text {
+                    data: format,
+                    font_family: Default::default(),
+                    font_size: Default::default(),
+                },
+                TextLocation::Line { line: line_number },
+                true,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayVStringAt
+    builder.insert(
+        0x688,
+        move |mut caller: Caller<'_, SdkState>,
+              x_pos: i32,
+              y_pos: i32,
+              format_ptr: u32,
+              _args: u32|
+              -> Result<()> {
+            let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
+            let sdk = caller.data_mut();
+
+            sdk.display.ctx(&mut sdk.protocol).write(
+                V5Text {
+                    data: format,
+                    font_family: Default::default(),
+                    font_size: Default::default(),
+                },
+                TextLocation::Coordinates {
+                    point: [x_pos, y_pos].into(),
+                },
+                true,
+            )?;
             Ok(())
         },
     );
@@ -171,15 +259,19 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               _args: u32|
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            caller.data_mut().display.write_text(
-                format,
-                (x_pos, y_pos),
-                false,
-                TextOptions {
-                    font_type: FontType::Small,
-                    ..Default::default()
+            let sdk = caller.data_mut();
+
+            sdk.display.ctx(&mut sdk.protocol).write(
+                V5Text {
+                    data: format,
+                    font_family: Default::default(),
+                    font_size: V5FontSize::Small,
                 },
-            );
+                TextLocation::Coordinates {
+                    point: [x_pos, y_pos].into(),
+                },
+                true,
+            )?;
             Ok(())
         },
     );
@@ -197,432 +289,225 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               -> Result<()> {
             let buffer_len = (x2 - x1) as usize * (y2 - y1) as usize * 4;
             let buffer = memory.data(&mut caller)[buffer_ptr as usize..][..buffer_len].to_vec();
-            caller
-                .data_mut()
-                .display
-                .draw_buffer(&buffer, (x1, y1), (x2, y2), stride);
+            let sdk = caller.data_mut();
+            sdk.display.ctx(&mut sdk.protocol).draw_buffer(
+                &buffer,
+                [x1, y1],
+                [x2, y2],
+                NonZeroU16::new(stride as u16)
+                    .with_context(|| format!("Unexpected stride value {stride:?}"))?,
+            )?;
             Ok(())
         },
     );
 }
 
-// MARK: API
-
-pub enum Path {
-    Rect { x1: i32, y1: i32, x2: i32, y2: i32 },
-    Circle { cx: i32, cy: i32, radius: i32 },
-}
-
-impl From<Rect<i32>> for Path {
-    fn from(rect: Rect<i32>) -> Self {
-        Path::Rect {
-            x1: rect.min.x,
-            y1: rect.min.y,
-            x2: rect.max.x,
-            y2: rect.max.y,
-        }
-    }
-}
-
-impl Path {
-    fn normalize(&mut self) {
-        match self {
-            Path::Rect { x1, y1, x2, y2 } => {
-                *x1 = (*x1).clamp(0, DISPLAY_WIDTH as i32 - 1);
-                *y1 = (*y1).clamp(0, DISPLAY_HEIGHT as i32 - 1);
-                *x2 = (*x2).clamp(0, DISPLAY_WIDTH as i32 - 1);
-                *y2 = (*y2).clamp(0, DISPLAY_HEIGHT as i32 - 1);
-            }
-            Path::Circle { cx, cy, .. } => {
-                *cx = (*cx).clamp(0, DISPLAY_WIDTH as i32 - 1);
-                *cy = (*cy).clamp(0, DISPLAY_HEIGHT as i32 - 1);
-            }
-        }
-    }
-
-    fn draw<T: AsMut<[u8]> + AsRef<[u8]>>(
-        &self,
-        canvas: &mut Image<T, 3>,
-        stroke: bool,
-        color: RGB,
-    ) {
-        match *self {
-            Path::Rect { x1, y1, x2, y2 } => {
-                let coords = (x1 as u32, y1 as u32);
-                let width = (x2 - x1).try_into().unwrap();
-                let height = (y2 - y1).try_into().unwrap();
-                if stroke {
-                    canvas.r#box(coords, width, height, color);
-                } else {
-                    canvas.filled_box(coords, width, height, color);
-                }
-            }
-            Path::Circle { cx, cy, radius } => {
-                if stroke {
-                    canvas.border_circle((cx, cy), radius, color);
-                } else {
-                    canvas.circle((cx, cy), radius, color);
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct TextLine(pub i32);
-
-impl TextLine {
-    pub fn coords(&self) -> (i32, i32) {
-        (0, self.0 * 20 + HEADER_HEIGHT as i32)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum FontFamily {
-    #[default]
-    UserMono,
-    TimerMono,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum FontType {
-    Small,
-    #[default]
-    Normal,
-    Big,
-}
-
-impl FontType {
-    /// Multiplier for the X axis scale of the font.
-    pub fn x_scale() -> f32 {
-        0.9
-    }
-
-    /// Extra spacing in pixels between characters (x-axis).
-    pub fn x_spacing() -> f32 {
-        1.1
-    }
-
-    /// Font size in pixels.
-    pub fn font_size(&self) -> f32 {
-        match self {
-            FontType::Small => 15.0,
-            FontType::Normal => 16.0,
-            FontType::Big => 32.0,
-        }
-    }
-
-    /// Y-axis offset applied before rendering.
-    pub fn y_offset(&self) -> i32 {
-        match self {
-            FontType::Small => -2,
-            FontType::Normal => -2,
-            FontType::Big => -1,
-        }
-    }
-
-    /// Line height of the highlighted area behind text.
-    pub fn line_height(&self) -> i32 {
-        match self {
-            FontType::Small => 13,
-            FontType::Normal => 2,
-            FontType::Big => 2,
-        }
-    }
-
-    /// Y-axis offset applied to the highlighted area behind text.
-    pub fn backdrop_y_offset(&self) -> i32 {
-        match self {
-            FontType::Small => 2,
-            FontType::Normal => 0,
-            FontType::Big => 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct TextOptions {
-    pub font_type: FontType,
-    pub family: FontFamily,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum RenderMode {
-    #[default]
-    Immediate,
-    DoubleBuffered,
-}
-
-/// Blends a partially transparent foreground color with a background color.
-fn blend_pixel(bg: RGB, fg: RGB, fg_alpha: f32) -> RGB {
-    // outputRed = (foregroundRed * foregroundAlpha) + (backgroundRed * (1.0 - foregroundAlpha));
-
-    [
-        (fg[0] as f32 * fg_alpha + bg[0] as f32 * (1.0 - fg_alpha)).round() as u8,
-        (fg[1] as f32 * fg_alpha + bg[1] as f32 * (1.0 - fg_alpha)).round() as u8,
-        (fg[2] as f32 * fg_alpha + bg[2] as f32 * (1.0 - fg_alpha)).round() as u8,
-    ]
-}
-
-/// Calculates the size of a layout of glyphs.
-fn size_of_layout(glyphs: &[PositionedGlyph]) -> Option<Rect<i32>> {
-    let last_char = glyphs.last()?;
-    let first_char = &glyphs[0];
-    let last_bounding_box = last_char.pixel_bounding_box().unwrap();
-    let first_bounding_box = first_char.pixel_bounding_box().unwrap();
-    Some(Rect {
-        min: first_bounding_box.min,
-        max: Point {
-            x: last_bounding_box.max.x + (FontType::x_spacing() * glyphs.len() as f32) as i32,
-            y: last_bounding_box.max.y,
-        },
-    })
-}
-
 // MARK: Display
 
-pub const DISPLAY_HEIGHT: u32 = 272;
-pub const DISPLAY_WIDTH: u32 = 480;
-pub const HEADER_HEIGHT: u32 = 32;
+pub const DISPLAY_HEIGHT: i32 = 272;
+pub const DISPLAY_WIDTH: i32 = 480;
+pub const HEADER_HEIGHT: i32 = 32;
 
-pub const BLACK: RGB = [0, 0, 0];
-pub const WHITE: RGB = [255, 255, 255];
-pub const HEADER_BG: RGB = [0x00, 0x99, 0xCC];
+pub const BLACK: RGB8 = RGB8::new(0, 0, 0);
+pub const WHITE: RGB8 = RGB8::new(255, 255, 255);
+pub const HEADER_BG: RGB8 = RGB8::new(0x00, 0x99, 0xCC);
 
-type Canvas = Image<Box<[u8]>, 3>;
-
-pub struct Display {
-    /// The display's saved foreground color.
-    pub foreground_color: Color,
-    /// The display's saved background color.
-    pub background_color: Color,
-    /// Cache for text layout calculations, to avoid re-calculating the same text layout multiple times in a row.
-    text_layout_cache: Option<(String, TextOptions, Vec<PositionedGlyph<'static>>)>,
+pub struct DisplayCtx<'a> {
+    display: &'a mut Display,
+    protocol: &'a mut Protocol,
 }
 
-impl Display {
-    pub fn new(program_options: ProgramOptions) -> Self {
-        Self {
-            foreground_color: program_options.default_fg_color(),
-            background_color: program_options.default_bg_color(),
-            text_layout_cache: None,
-        }
-    }
-
+impl<'a> DisplayCtx<'a> {
     /// Copies a buffer of pixels to the display.
     fn draw_buffer(
         &mut self,
-        protocol: &mut Protocol,
         buf: &[u8],
-        top_left: (i32, i32),
-        bot_right: (i32, i32),
-        stride: u32,
-    ) {
+        top_left: impl Into<Point2<i32>>,
+        bot_right: impl Into<Point2<i32>>,
+        stride: NonZeroU16,
+    ) -> anyhow::Result<()> {
         let buffer = BASE64_STANDARD.encode(buf);
-        protocol.send(&Event::ScreenDraw {
+        self.protocol.send(&Event::ScreenDraw {
             command: DrawCommand::CopyBuffer {
-                top_left: Point {
-                    x: top_left.0,
-                    y: top_left.1,
-                },
-                bottom_right: Point {
-                    x: bot_right.0,
-                    y: bot_right.1,
-                },
-                stride: stride,
+                top_left: top_left.into(),
+                bottom_right: bot_right.into(),
+                stride,
                 buffer,
             },
-            color: self.foreground_color,
+            color: self.display.foreground_color,
+            background: self.display.background_color,
         })?;
-    }
 
-    /// Draws the blue program header at the top of the display.
-    fn draw_header(&mut self) {
-        self.filled_box((0, 0), DISPLAY_WIDTH, HEADER_HEIGHT, HEADER_BG);
-        let elapsed = self.start_instant.elapsed().as_secs();
-        let secs = elapsed % 60;
-        let mins = elapsed / 60;
-        let time = format!("{:01}:{:02}", mins, secs);
-        self.write_text(
-            time,
-            ((DISPLAY_WIDTH / 2) as i32, 3),
-            true,
-            TextOptions {
-                font_type: FontType::Big,
-                family: FontFamily::TimerMono,
-            },
-        );
-    }
-
-    fn normalize_text(text: &str) -> String {
-        text.replace('\n', ".")
-    }
-
-    /// Sends the display to the render thread.
-    pub fn render(&mut self, explicitly_requested: bool) {
-        if explicitly_requested {
-            self.render_mode = RenderMode::DoubleBuffered;
-        } else if self.render_mode == RenderMode::DoubleBuffered {
-            return;
-        }
-        if let Some(tx) = self.render_tx.as_mut() {
-            tx.update(Some(self.canvas.clone())).unwrap();
-        }
-    }
-
-    /// Disables double buffering, causing the display to render after every update.
-    pub fn disable_double_buffer(&mut self) {
-        assert!(self.render_tx.is_some());
-        self.render_mode = RenderMode::Immediate;
-    }
-
-    /// Erases the display by filling it with the default background color.
-    pub fn erase(&mut self) {
-        self.canvas.filled_box(
-            (0, 0),
-            DISPLAY_WIDTH,
-            DISPLAY_HEIGHT,
-            self.program_options.default_bg_color(),
-        );
+        Ok(())
     }
 
     /// Draws or strokes a shape on the display, using the current foreground color.
-    pub fn draw(&mut self, mut shape: Path, stroke: bool) {
-        shape.normalize();
-        shape.draw(&mut self.canvas, stroke, self.foreground_color);
-        self.render(false);
+    pub fn draw(&mut self, shape: Shape, stroke: bool) -> anyhow::Result<()> {
+        self.protocol.send(&Event::ScreenDraw {
+            command: if stroke {
+                DrawCommand::Stroke { shape }
+            } else {
+                DrawCommand::Fill { shape }
+            },
+            color: self.display.foreground_color,
+            background: self.display.background_color,
+        })?;
+        Ok(())
     }
 
-    /// Removes the last text layout from the cache if it matches the given text and options.
-    fn take_cached_glyphs_for(
-        &self,
-        text: &str,
-        options: TextOptions,
-    ) -> Option<Vec<PositionedGlyph<'static>>> {
-        let (cached_text, cached_options, glyphs) = self.text_layout_cache.take()?;
-        if text == cached_text && options == cached_options {
-            Some(glyphs)
-        } else {
-            None
-        }
-    }
-
-    /// Returns the glyphs for the given text, using the given options.
-    ///
-    /// May either return cached glyphs or calculate them when called.
-    fn glyphs_for(&self, text: &str, options: TextOptions) -> Vec<PositionedGlyph<'static>> {
-        if let Some(glyphs) = self.take_cached_glyphs_for(text, options) {
-            return glyphs;
-        }
-
-        let scale = Scale {
-            y: options.font_type.font_size(),
-            // V5's version of the Noto Mono font is slightly different
-            // than the one bundled with the simulator, so we have to apply
-            // an scale on the X axis and later move the characters further apart.
-            x: options.font_type.font_size() * FontType::x_scale(),
-        };
-        let font = self.font_family(options.family);
-        let v_metrics = font.v_metrics(scale);
-        font.layout(text, scale, point(0.0, 0.0 + v_metrics.ascent))
-            .collect()
-    }
-
-    /// Calculates the shape of the area behind a text layout, so that it can be drawn on top of a background color.
-    fn calculate_text_background(
-        glyphs: &[PositionedGlyph],
-        coords: (i32, i32),
-        font_size: FontType,
-    ) -> Option<Path> {
-        let size = size_of_layout(glyphs)?;
-        let mut backdrop = Path::Rect {
-            x1: size.min.x + coords.0 - 1,
-            y1: coords.1 + font_size.backdrop_y_offset(),
-            x2: size.max.x + coords.0 + 1,
-            y2: coords.1 + font_size.backdrop_y_offset() + font_size.line_height() - 1,
-        };
-
-        backdrop.normalize();
-        Some(backdrop)
-    }
-
-    /// Writes text to the display at a given line number.
-    ///
-    /// # Arguments
-    ///
-    /// * `text`: The text to write to the display.
-    /// * `coords`: The coordinates at which to write the text.
-    /// * `transparent`: Whether the text should not have a background (highlight) color.
-    /// * `options`: The options to use when rendering the text.
-    pub fn write_text(
+    pub fn write(
         &mut self,
-        mut text: String,
-        mut coords: (i32, i32),
-        transparent: bool,
-        options: TextOptions,
-    ) {
-        text = Self::normalize_text(&text);
-        if text.is_empty() {
-            return;
-        }
-
-        // The V5's text is all offset vertically from ours, so this adjustment makes it consistent.
-        coords.1 += options.font_type.y_offset();
-
-        let fg = self.foreground_color;
-        let glyphs = self.glyphs_for(&text, options);
-
-        if !transparent {
-            let backdrop =
-                Self::calculate_text_background(&glyphs, coords, options.font_type).unwrap();
-            backdrop.draw(&mut self.canvas, false, self.background_color);
-        }
-
-        for (idx, glyph) in glyphs.iter().enumerate() {
-            if let Some(bounding_box) = glyph.pixel_bounding_box() {
-                // Draw the glyph into the image per-pixel
-                glyph.draw(|mut x, mut y, alpha| {
-                    // Apply offsets to make the coordinates image-relative, not text-relative
-                    x += bounding_box.min.x as u32
-                        + coords.0 as u32
-                        // Similar reasoning to when we applied the x scale to the font.
-                        + (FontType::x_spacing() * idx as f32) as u32;
-                    y += bounding_box.min.y as u32 + coords.1 as u32;
-
-                    if !(x < self.width() && y < self.height()) {
-                        return;
-                    }
-
-                    // I didn't find a safe version of pixel and set_pixel.
-                    // SAFETY: Pixel bounds are checked.
-                    unsafe {
-                        let old_pixel = self.pixel(x, y);
-
-                        self.set_pixel(
-                            x,
-                            y,
-                            // Taking this power seems to make the alpha blending look better;
-                            // otherwise it's not heavy enough.
-                            blend_pixel(old_pixel, fg, alpha.powf(0.4).clamp(0.0, 1.0)),
-                        );
-                    }
-                });
-            }
-        }
-
-        // Add (or re-add) the laid-out glyphs to the cache so they can be used later.
-        self.text_layout_cache.set(Some((text, options, glyphs)));
-        self.render(false);
+        text: V5Text,
+        location: TextLocation,
+        opaque: bool,
+    ) -> anyhow::Result<()> {
+        self.display.last_font_size = text.font_size;
+        self.protocol.send(&Event::ScreenDraw {
+            command: DrawCommand::Write {
+                text,
+                location,
+                opaque,
+            },
+            color: self.display.foreground_color,
+            background: self.display.background_color,
+        })?;
+        Ok(())
     }
 
-    /// Calculates how big a string will be when rendered.
+    pub fn with_colors<R>(&mut self, fg: RGB8, bg: RGB8, func: impl FnOnce(&mut Self) -> R) -> R {
+        let old_fg = self.display.foreground_color;
+        let old_bg = self.display.background_color;
+        self.display.foreground_color = fg;
+        self.display.background_color = bg;
+        let result = func(self);
+        self.display.foreground_color = old_fg;
+        self.display.background_color = old_bg;
+        result
+    }
+
+    /// Draws the blue program header at the top of the display.
+    fn draw_header(&mut self) -> anyhow::Result<()> {
+        self.with_colors(HEADER_BG, RGB8::default(), |ctx| {
+            ctx.draw(
+                Shape::Rectangle {
+                    top_left: [0, 0].into(),
+                    bottom_right: [DISPLAY_WIDTH as i32, HEADER_HEIGHT as i32].into(),
+                },
+                false,
+            )
+        })?;
+
+        let elapsed = self.display.start_instant.elapsed().as_secs();
+        let secs = elapsed % 60;
+        let mins = elapsed / 60;
+        let time = format!("{:01}:{:02}", mins, secs);
+        self.write(
+            V5Text {
+                data: time,
+                font_family: V5FontFamily::TimerMono,
+                font_size: V5FontSize::Large,
+            },
+            TextLocation::Coordinates {
+                point: [DISPLAY_WIDTH / 2, 3].into(),
+            },
+            true,
+        )?;
+        Ok(())
+    }
+
+    /// Sends the display to the render thread.
+    pub fn set_double_buffered(&mut self, enable: bool) -> anyhow::Result<()> {
+        if self.display.double_buffered == enable {
+            return Ok(());
+        }
+        self.display.double_buffered = enable;
+        self.protocol
+            .send(&Event::ScreenDoubleBufferMode { enable })?;
+        Ok(())
+    }
+
+    /// Erases the display by filling it with the default background color.
+    pub fn erase(&mut self) -> anyhow::Result<()> {
+        self.with_colors(
+            self.display.program_options.default_fg_color(),
+            BLACK,
+            |ctx| {
+                ctx.draw(
+                    Shape::Rectangle {
+                        top_left: [0, 0].into(),
+                        bottom_right: [DISPLAY_WIDTH as i32, DISPLAY_HEIGHT as i32].into(),
+                    },
+                    false,
+                )
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Fetches how big a string will be when rendered.
     ///
     /// Caches the result so that the same text and options don't have to be calculated multiple times in a row.
-    pub fn calculate_string_size(&self, mut text: String, options: TextOptions) -> Point<i32> {
-        text = Self::normalize_text(&text);
-        let glyphs = self.glyphs_for(&text, options);
-        let size = size_of_layout(&glyphs);
-        self.text_layout_cache.set(Some((text, options, glyphs)));
-        size.unwrap_or_default().max
+    pub fn get_text_metrics(&mut self, text: V5Text) -> anyhow::Result<TextMetrics> {
+        if let Some((cached_text, metrics)) = &self.display.text_metrics_cache {
+            if cached_text == &text {
+                return Ok(*metrics);
+            }
+        }
+        self.protocol
+            .send(&Event::TextMetricsRequest { text: text.clone() })?;
+
+        let cmd = self.protocol.wait_for_command(
+            |c| matches!(c, Command::SetTextMetrics { text: recv_text, .. } if *recv_text == text),
+        )?;
+        let metrics = match cmd {
+            Command::SetTextMetrics { metrics, .. } => metrics,
+            _ => unreachable!(),
+        };
+        self.display.text_metrics_cache = Some((text, metrics));
+        Ok(metrics)
+    }
+
+    pub fn set_metrics_cache(&mut self, text: V5Text, metrics: TextMetrics) {
+        self.display.text_metrics_cache = Some((text, metrics));
+    }
+
+    pub fn render(&mut self) -> anyhow::Result<()> {
+        self.set_double_buffered(true)?;
+        self.protocol.send(&Event::ScreenRender)?;
+        Ok(())
+    }
+}
+
+pub struct Display {
+    /// The display's saved foreground color.
+    pub foreground_color: RGB8,
+    /// The display's saved background color.
+    pub background_color: RGB8,
+    start_instant: Instant,
+    program_options: ProgramOptions,
+    /// Cache for text layout calculations, to avoid re-calculating the same text layout multiple times in a row.
+    text_metrics_cache: Option<(V5Text, TextMetrics)>,
+    last_font_size: V5FontSize,
+    double_buffered: bool,
+}
+
+impl Display {
+    pub fn new(program_options: ProgramOptions, start_instant: Instant) -> Self {
+        Self {
+            foreground_color: program_options.default_fg_color(),
+            background_color: program_options.default_bg_color(),
+            program_options,
+            text_metrics_cache: None,
+            start_instant,
+            last_font_size: V5FontSize::Normal,
+            double_buffered: false,
+        }
+    }
+
+    pub fn ctx<'a>(&'a mut self, protocol: &'a mut Protocol) -> DisplayCtx<'a> {
+        DisplayCtx {
+            display: self,
+            protocol,
+        }
     }
 }

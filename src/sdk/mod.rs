@@ -52,7 +52,6 @@ pub struct SdkState {
     competition_mode: CompetitionMode,
     protocol: Protocol,
     is_executing: bool,
-    command_process_queue: VecDeque<Command>,
 }
 
 impl SdkState {
@@ -68,7 +67,6 @@ impl SdkState {
             competition_mode: CompetitionMode::default(),
             protocol,
             is_executing: false,
-            command_process_queue: VecDeque::default(),
         }
     }
 
@@ -83,35 +81,14 @@ impl SdkState {
 
     /// Process the next command, blocking if it hasn't been received yet.
     pub fn recv_command(&mut self) -> anyhow::Result<()> {
-        let cmd = self
-            .command_process_queue
-            .pop_front()
-            .map_or_else(|| self.protocol.recv(), Ok)?;
+        let cmd = self.protocol.next()?;
         self.execute_command(cmd)
     }
 
     /// Process all available commands.
     pub fn recv_all_commands(&mut self) -> anyhow::Result<()> {
-        while let Some(cmd) = self
-            .command_process_queue
-            .pop_front()
-            .map_or_else(|| self.protocol.try_recv(), |x| Ok(Some(x)))?
-        {
+        while let Some(cmd) = self.protocol.try_next()? {
             self.execute_command(cmd)?;
-        }
-        Ok(())
-    }
-
-    /// Blocks until a command has been received that satisfies the condition, then executes the command.
-    pub fn wait_for_command(&mut self, check: impl Fn(&Command) -> bool) -> anyhow::Result<()> {
-        loop {
-            let cmd = self.protocol.recv()?;
-            if check(&cmd) {
-                self.execute_command(cmd);
-                break;
-            } else {
-                self.command_process_queue.push_back(cmd);
-            }
         }
         Ok(())
     }
@@ -151,11 +128,7 @@ impl SdkState {
                 self.is_executing = true;
             }
             Command::SetBatteryCapacity { capacity } => todo!(),
-            Command::SetTextMetrics {
-                text,
-                options,
-                metrics,
-            } => {}
+            Command::SetTextMetrics { text, metrics } => {}
         }
         Ok(())
     }

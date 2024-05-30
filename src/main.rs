@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use bytes::{Buf, Bytes};
 use clap::Parser as _;
-use fimg::pixels::convert::RGB;
 use fs_err as fs;
 
 use protocol::Protocol;
+use rgb::RGB8;
 use sdk::display::{BLACK, WHITE};
 use vexide_simulator_protocol::Event;
 use wasmparser::{Parser, Payload};
@@ -51,7 +51,7 @@ pub struct ProgramOptions {
 }
 
 impl ProgramOptions {
-    pub const fn default_fg_color(&self) -> RGB {
+    pub const fn default_fg_color(&self) -> RGB8 {
         if self.invert_default_graphics_colors {
             BLACK
         } else {
@@ -59,7 +59,7 @@ impl ProgramOptions {
         }
     }
 
-    pub const fn default_bg_color(&self) -> RGB {
+    pub const fn default_bg_color(&self) -> RGB8 {
         if self.invert_default_graphics_colors {
             WHITE
         } else {
