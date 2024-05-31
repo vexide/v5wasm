@@ -4,10 +4,13 @@ use anyhow::bail;
 use bitflags::bitflags;
 
 use serial::{build_serial_jump_table, Serial};
-use vexide_simulator_protocol::{Command, CompMode, CompetitionMode, Event};
+use vexide_simulator_protocol::{Command, CompMode, CompetitionMode, Event, LogLevel};
 use wasmtime::*;
 
-use crate::{protocol::Protocol, ProgramOptions};
+use crate::{
+    protocol::{self, Log, Protocol},
+    ProgramOptions,
+};
 
 use self::{
     controller::{build_controller_jump_table, Inputs},
@@ -120,6 +123,13 @@ impl SdkState {
     }
 }
 
+impl Log for SdkState {
+    fn log(&mut self, level: LogLevel, message: String) -> protocol::Result<()> {
+        self.protocol.send(&Event::Log { level, message })?;
+        Ok(())
+    }
+}
+
 const JUMP_TABLE_START: usize = 0x037FC000;
 
 /// Wrapper for the jump table which allows for easily adding new functions to it.
@@ -227,7 +237,9 @@ impl JumpTable {
                 &sdk_index.to_le_bytes(),
             )?;
         }
-        eprintln!("Jump table exposed with {api_size} functions");
+        store
+            .data_mut()
+            .trace(format!("Jump table exposed with {api_size} functions"))?;
         Ok(())
     }
 }

@@ -6,7 +6,7 @@ use std::{
 
 use jsonl::ReadError;
 use snafu::{OptionExt, ResultExt, Snafu};
-use vexide_simulator_protocol::{Command, Event};
+use vexide_simulator_protocol::{Command, Event, LogLevel};
 
 #[derive(Debug, Snafu)]
 pub enum ProtocolError {
@@ -29,7 +29,7 @@ pub enum ProtocolError {
     },
 }
 
-type Result<T, E = ProtocolError> = std::result::Result<T, E>;
+pub type Result<T, E = ProtocolError> = std::result::Result<T, E>;
 
 pub struct Protocol {
     handshake_finished: bool,
@@ -148,5 +148,27 @@ impl Protocol {
                 self.command_process_queue.push_back(cmd);
             }
         }
+    }
+}
+
+pub trait Log {
+    fn log(&mut self, level: LogLevel, message: String) -> Result<()>;
+    fn trace(&mut self, message: impl Into<String>) -> Result<()> {
+        self.log(LogLevel::Trace, message.into())
+    }
+    fn info(&mut self, message: impl Into<String>) -> Result<()> {
+        self.log(LogLevel::Info, message.into())
+    }
+    fn warn(&mut self, message: impl Into<String>) -> Result<()> {
+        self.log(LogLevel::Warn, message.into())
+    }
+    fn error(&mut self, message: impl Into<String>) -> Result<()> {
+        self.log(LogLevel::Error, message.into())
+    }
+}
+
+impl Log for Protocol {
+    fn log(&mut self, level: LogLevel, message: String) -> Result<()> {
+        self.send(&Event::Log { level, message })
     }
 }

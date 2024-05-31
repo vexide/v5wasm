@@ -5,7 +5,7 @@ use bytes::{Buf, Bytes};
 use clap::Parser as _;
 use fs_err as fs;
 
-use protocol::Protocol;
+use protocol::{Log, Protocol};
 use rgb::RGB8;
 use sdk::display::{BLACK, WHITE};
 use vexide_simulator_protocol::{Event, VCodeSig};
@@ -139,7 +139,7 @@ fn main() -> Result<()> {
     let mut protocol = Protocol::open();
     protocol.handshake()?;
 
-    eprintln!("Compiling...");
+    protocol.info("Compiling...")?;
     let engine = Engine::new(
         Config::new()
             .debug_info(true)
@@ -148,7 +148,7 @@ fn main() -> Result<()> {
     let (module, cold_header) = load_program(&engine, &args.program, &mut protocol)
         .context("Failed to load robot program")?;
 
-    eprintln!("Booting...");
+    protocol.info("Booting...")?;
 
     let state = SdkState::new(module.clone(), cold_header, protocol);
 
@@ -172,9 +172,9 @@ fn main() -> Result<()> {
     linker.func_wrap(
         "env",
         "sim_log_backtrace",
-        |caller: Caller<'_, SdkState>| {
-            let backtrace = WasmBacktrace::capture(caller);
-            eprintln!("{}", backtrace);
+        |mut caller: Caller<'_, SdkState>| {
+            let backtrace = WasmBacktrace::capture(&caller);
+            caller.data_mut().error(format!("{}", backtrace))?;
             Ok(())
         },
     )?;
@@ -196,7 +196,7 @@ fn main() -> Result<()> {
     let run = instance.get_typed_func::<(), ()>(&mut store, "_entry")?;
     store.data_mut().setup()?;
     // We should be ready to actually run the entrypoint now.
-    eprintln!("_entry()");
+    store.data_mut().trace("Calling _entry()")?;
     run.call(&mut store, ())?;
 
     Ok(())
