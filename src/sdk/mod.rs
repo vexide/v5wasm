@@ -4,7 +4,7 @@ use anyhow::bail;
 use bitflags::bitflags;
 
 use serial::{build_serial_jump_table, Serial};
-use vexide_simulator_protocol::{Command, CompMode, Event};
+use vexide_simulator_protocol::{Command, CompMode, CompetitionMode, Event};
 use wasmtime::*;
 
 use crate::{protocol::Protocol, ProgramOptions};
@@ -17,25 +17,6 @@ use self::{
 mod controller;
 pub mod display;
 mod serial;
-
-#[derive(Debug)]
-pub struct CompetitionMode {
-    connected: bool,
-    mode: CompMode,
-    is_competition: bool,
-    enabled: bool,
-}
-
-impl Default for CompetitionMode {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            connected: false,
-            mode: CompMode::Driver,
-            is_competition: false,
-        }
-    }
-}
 
 /// The state of the SDK, containing the program's WASM module, the robot display, and other peripherals.
 pub struct SdkState {
@@ -102,18 +83,8 @@ impl SdkState {
             Command::USD { root } => todo!(),
             Command::VEXLinkOpened { port, mode } => todo!(),
             Command::VEXLinkClosed { port } => todo!(),
-            Command::CompetitionMode {
-                enabled,
-                connected,
-                mode,
-                is_competition,
-            } => {
-                self.competition_mode = CompetitionMode {
-                    enabled,
-                    mode,
-                    connected,
-                    is_competition,
-                };
+            Command::CompetitionMode(mode) => {
+                self.competition_mode = mode;
             }
             Command::ConfigureDevice { port, device } => todo!(),
             Command::AdiInput { port, voltage } => todo!(),
@@ -125,7 +96,13 @@ impl SdkState {
                 self.is_executing = true;
             }
             Command::SetBatteryCapacity { capacity } => todo!(),
-            Command::SetTextMetrics { text, metrics } => {}
+            Command::SetTextMetrics { text, metrics } => {
+                self.display.set_metrics_cache(text, metrics);
+            }
+            Command::Serial(serial_data) => {
+                self.serial
+                    .buffer_input(serial_data.channel, &serial_data.to_bytes()?)?;
+            }
         }
         Ok(())
     }

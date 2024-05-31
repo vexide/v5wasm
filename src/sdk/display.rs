@@ -334,8 +334,8 @@ impl<'a> DisplayCtx<'a> {
                 stride,
                 buffer,
             },
-            color: self.display.foreground_color,
-            background: self.display.background_color,
+            color: self.display.foreground_color.into(),
+            background: self.display.background_color.into(),
         })?;
 
         Ok(())
@@ -349,8 +349,8 @@ impl<'a> DisplayCtx<'a> {
             } else {
                 DrawCommand::Fill { shape }
             },
-            color: self.display.foreground_color,
-            background: self.display.background_color,
+            color: self.display.foreground_color.into(),
+            background: self.display.background_color.into(),
         })?;
         Ok(())
     }
@@ -368,8 +368,8 @@ impl<'a> DisplayCtx<'a> {
                 location,
                 opaque,
             },
-            color: self.display.foreground_color,
-            background: self.display.background_color,
+            color: self.display.foreground_color.into(),
+            background: self.display.background_color.into(),
         })?;
         Ok(())
     }
@@ -467,10 +467,6 @@ impl<'a> DisplayCtx<'a> {
         Ok(metrics)
     }
 
-    pub fn set_metrics_cache(&mut self, text: V5Text, metrics: TextMetrics) {
-        self.display.text_metrics_cache = Some((text, metrics));
-    }
-
     pub fn render(&mut self) -> anyhow::Result<()> {
         self.set_double_buffered(true)?;
         self.protocol.send(&Event::ScreenRender)?;
@@ -509,5 +505,9 @@ impl Display {
             display: self,
             protocol,
         }
+    }
+
+    pub fn set_metrics_cache(&mut self, text: V5Text, metrics: TextMetrics) {
+        self.text_metrics_cache = Some((text, metrics));
     }
 }

@@ -967,7 +967,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "vexide-simulator-protocol"
 version = "0.1.0"
-source = "git+https://github.com/vexide/simulator-protocol.git#e8829c3867382844a32ca9a40c94fce897edf5f9"
+source = "git+https://github.com/vexide/simulator-protocol.git#97ae10b60a05640371c8c7df6630392d7b725424"
 dependencies = [
  "base64",
  "mint",

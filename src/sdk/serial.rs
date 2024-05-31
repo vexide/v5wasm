@@ -1,14 +1,12 @@
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
-use anyhow::{anyhow, Context};
-use vexide_simulator_protocol::Event;
+use anyhow::{anyhow, bail, Context};
+use vexide_simulator_protocol::{Event, SerialData};
 use wasmtime::*;
 
 use crate::{protocol::Protocol, sdk::SdkState};
 
 use super::JumpTableBuilder;
-
-// MARK: Constants
 
 // MARK: Jump table
 
@@ -103,14 +101,24 @@ impl Serial {
         }
     }
 
+    pub fn buffer_input(&mut self, channel: u32, buffer: &[u8]) -> Result<()> {
+        match channel {
+            1 => {
+                self.stdin_buffer
+                    .write_all(buffer)
+                    .context("Failed to write to stdin")?;
+                Ok(())
+            }
+            _ => Err(anyhow!("Invalid channel")),
+        }
+    }
+
     pub fn read_byte(&mut self, channel: u32) -> Result<u8> {
         match channel {
             1 => {
-                let mut buffer = [0; 1];
-                self.stdin_buffer
-                    .read_exact(&mut buffer)
-                    .context("Failed to read from stdin")?;
-                Ok(buffer[0])
+                let byte = self.peek_byte(channel)?;
+                self.stdin_buffer.seek(SeekFrom::Current(-1)).unwrap();
+                Ok(byte)
             }
             _ => Err(anyhow!("Invalid channel")),
         }
@@ -119,12 +127,13 @@ impl Serial {
     pub fn peek_byte(&mut self, channel: u32) -> Result<u8> {
         match channel {
             1 => {
-                let mut buffer = [0; 1];
-                self.stdin_buffer
-                    .read_exact(&mut buffer)
-                    .context("Failed to read from stdin")?;
-                self.stdin_buffer.seek(SeekFrom::Current(-1)).unwrap();
-                Ok(buffer[0])
+                let pos = self.stdin_buffer.position();
+                if pos == 0 {
+                    bail!("No data in stdin buffer");
+                }
+                let idx = pos - 1;
+                let byte = self.stdin_buffer.get_ref()[idx as usize];
+                Ok(byte)
             }
             _ => Err(anyhow!("Invalid channel")),
         }
@@ -146,11 +155,8 @@ impl Serial {
             Cursor::new([0; STDOUT_BUFFER_SIZE]),
         );
         let len = stdout.position() as usize;
-        let bytes = stdout.into_inner()[0..len].to_vec();
-        protocol.send(&Event::Serial {
-            channel: 1,
-            data: bytes,
-        })?;
+        let bytes = &stdout.into_inner()[0..len];
+        protocol.send(&Event::Serial(SerialData::new(1, bytes)))?;
         Ok(())
     }
 }
