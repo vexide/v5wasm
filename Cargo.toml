@@ -1,5 +1,5 @@
 [package]
-name = "vex-sdk-sim"
+name = "v5wasm"
 version = "0.2.0"
 edition = "2021"
 
