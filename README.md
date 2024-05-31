@@ -15,7 +15,7 @@ Prerequisites:
 - A recent version of Rust
 - CMake, so that Cargo can build SDL2
 
-Apart from that, you should be able to run `cargo install --git "https://github.com/vexide/vex-sdk-sim.git"` to install the engine.
+Apart from that, you should be able to run `cargo install --git "https://github.com/vexide/v5wasm.git"` to install the engine.
 
 You might also be able to get builds from the "Releases" tab on Github, but they could be out of date or missing.
 
