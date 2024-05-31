@@ -19,7 +19,7 @@ rusttype = "0.9.3"
 sdl2 = { version = "0.36.0", features = ["bundled", "static-link"] }
 snafu = "0.8.3"
 vexide-simulator-protocol = { git = "https://github.com/vexide/simulator-protocol.git", version = "0.1.0" }
-wasmparser = "0.209.1"
+wasmparser = "0.207.0"
 wasmtime = { version = "21.0.1", default-features = false, features = [
     "std",
     # "cache",

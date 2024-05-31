@@ -212,7 +212,23 @@ impl JumpTable {
         }
 
         // vexCompetitionStatus
-        builder.insert(0x9d8, move || -> u32 { CompetitionStatus::empty().bits() });
+        builder.insert(0x9d8, move |caller: Caller<'_, SdkState>| -> u32 {
+            let status = caller.data().competition_mode;
+            let mut bits = CompetitionStatus::empty();
+            if !status.enabled {
+                bits |= CompetitionStatus::DISABLED;
+            }
+            if status.mode == CompMode::Auto {
+                bits |= CompetitionStatus::AUTONOMOUS;
+            }
+            if status.connected {
+                bits |= CompetitionStatus::CONNECTED;
+            }
+            if status.is_competition {
+                bits |= CompetitionStatus::SYSTEM;
+            }
+            bits.bits()
+        });
 
         builder.jump_table
     }
