@@ -4,17 +4,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use base64::prelude::*;
 use mint::Point2;
 use rgb::RGB8;
 use vexide_simulator_protocol::{
-    Command, DrawCommand, Event, ScrollLocation, Shape, TextLocation, TextMetrics, V5FontFamily,
-    V5FontSize, V5Text,
+    Command, DrawCommand, Event, LogLevel, Rect, ScrollLocation, Shape, TextLocation, TextMetrics,
+    V5FontFamily, V5FontSize, V5Text,
 };
 use wasmtime::*;
 
-use crate::{protocol::Protocol, ProgramOptions};
+use crate::{
+    protocol::{warn_bt, Log, Protocol},
+    ProgramOptions,
+};
 
 use super::{clone_c_string, JumpTableBuilder, MemoryExt, SdkState};
 
@@ -112,6 +115,55 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                     bottom_right: [x, y].into(),
                 },
                 false,
+                false,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayPixelClear
+    builder.insert(
+        0x65c,
+        move |mut caller: Caller<'_, SdkState>, x: i32, y: i32| {
+            caller.data_mut().display_ctx().draw(
+                Shape::Rectangle {
+                    top_left: [x, y].into(),
+                    bottom_right: [x, y].into(),
+                },
+                false,
+                true,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayLineDraw
+    builder.insert(
+        0x660,
+        move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
+            caller.data_mut().display_ctx().draw(
+                Shape::Line {
+                    start: [x1, y1].into(),
+                    end: [x2, y2].into(),
+                },
+                true,
+                false,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayLineClear
+    builder.insert(
+        0x664,
+        move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
+            caller.data_mut().display_ctx().draw(
+                Shape::Line {
+                    start: [x1, y1].into(),
+                    end: [x2, y2].into(),
+                },
+                true,
+                true,
             )?;
             Ok(())
         },
@@ -126,6 +178,23 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                     top_left: [x1, y1].into(),
                     bottom_right: [x2, y2].into(),
                 },
+                true,
+                false,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayRectClear
+    builder.insert(
+        0x66c,
+        move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
+            caller.data_mut().display_ctx().draw(
+                Shape::Rectangle {
+                    top_left: [x1, y1].into(),
+                    bottom_right: [x2, y2].into(),
+                },
+                true,
                 true,
             )?;
             Ok(())
@@ -142,6 +211,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                     bottom_right: [x2, y2].into(),
                 },
                 false,
+                false,
             )?;
             Ok(())
         },
@@ -156,6 +226,23 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                     center: [cx, cy].into(),
                     radius: radius as u16,
                 },
+                true,
+                false,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayCircleClear
+    builder.insert(
+        0x678,
+        move |mut caller: Caller<'_, SdkState>, cx: i32, cy: i32, radius: i32| {
+            caller.data_mut().display_ctx().draw(
+                Shape::Circle {
+                    center: [cx, cy].into(),
+                    radius: radius as u16,
+                },
+                true,
                 true,
             )?;
             Ok(())
@@ -172,7 +259,88 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                     radius: radius as u16,
                 },
                 false,
+                false,
             )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayTextSize
+    builder.insert(0x6a8, move |_u: u32, _d: u32| -> Result<()> {
+        bail!("vexDisplayTextSize is not implemented");
+    });
+
+    // vexDisplayFontNamedSet
+    builder.insert(0x6b4, move |_name: u32| -> Result<()> {
+        bail!("vexDisplayFontNamedSet is not implemented");
+    });
+
+    // vexDisplayForegroundColorGet
+    builder.insert(0x6b8, move |caller: Caller<'_, SdkState>| -> u32 {
+        let color = caller.data().display.foreground_color;
+        (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
+    });
+
+    // vexDisplayBackgroundColorGet
+    builder.insert(0x6bc, move |caller: Caller<'_, SdkState>| -> u32 {
+        let color = caller.data().display.background_color;
+        (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
+    });
+
+    // vexDisplayClipRegionSet
+    builder.insert(
+        0x794,
+        move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
+            caller.data_mut().display.clip_region = Rect {
+                top_left: [
+                    x1.clamp(0, DISPLAY_WIDTH),
+                    y1.clamp(HEADER_HEIGHT, DISPLAY_HEIGHT),
+                ]
+                .into(),
+                bottom_right: [
+                    x2.clamp(0, DISPLAY_WIDTH),
+                    y2.clamp(HEADER_HEIGHT, DISPLAY_HEIGHT),
+                ]
+                .into(),
+            };
+            Ok(())
+        },
+    );
+
+    // vexDisplayRender
+    builder.insert(
+        0x7a0,
+        move |mut caller: Caller<'_, SdkState>, vsync_wait: i32, run_scheduler: i32| {
+            caller.data_mut().display_ctx().render()?;
+            let vsync_finish = Instant::now() + Duration::from_secs_f64(1.0 / 60.0);
+            if vsync_wait != 0 {
+                let sdk = caller.data_mut();
+                while Instant::now() < vsync_finish {
+                    sleep(Duration::from_millis(1));
+                    if run_scheduler != 0 {
+                        sdk.recv_all_commands()?;
+                    }
+                }
+            }
+            Ok(())
+        },
+    );
+
+    // vexDisplayDoubleBufferDisable
+    builder.insert(0x7a4, move |mut caller: Caller<'_, SdkState>| {
+        caller.data_mut().display_ctx().set_double_buffered(false)?;
+        Ok(())
+    });
+
+    // vexDisplayClipRegionSetWithIndex
+    builder.insert(
+        0x7a8,
+        move |mut caller: Caller<'_, SdkState>, index: i32, x1: i32, y1: i32, x2: i32, y2: i32| {
+            if index != 0 {
+                warn_bt!(caller, "vexDisplayClipRegionSetWithIndex: index != 0");
+                return Ok(());
+            }
+
             Ok(())
         },
     );
@@ -210,31 +378,6 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
             Ok(size.height as u32)
         },
     );
-
-    // vexDisplayRender
-    builder.insert(
-        0x7a0,
-        move |mut caller: Caller<'_, SdkState>, vsync_wait: i32, run_scheduler: i32| {
-            caller.data_mut().display_ctx().render()?;
-            let vsync_finish = Instant::now() + Duration::from_secs_f64(1.0 / 60.0);
-            if vsync_wait != 0 {
-                let sdk = caller.data_mut();
-                while Instant::now() < vsync_finish {
-                    sleep(Duration::from_millis(1));
-                    if run_scheduler != 0 {
-                        sdk.recv_all_commands()?;
-                    }
-                }
-            }
-            Ok(())
-        },
-    );
-
-    // vexDisplayDoubleBufferDisable
-    builder.insert(0x7a4, move |mut caller: Caller<'_, SdkState>| {
-        caller.data_mut().display_ctx().set_double_buffered(false)?;
-        Ok(())
-    });
 
     // vexDisplayVPrintf
     builder.insert(
@@ -372,22 +515,27 @@ impl<'a> DisplayCtx<'a> {
                 buffer,
             },
             color: self.display.foreground_color.into(),
-            background: self.display.background_color.into(),
+            clip_region: self.display.clip_region,
         })?;
 
         Ok(())
     }
 
     /// Draws or strokes a shape on the display, using the current foreground color.
-    pub fn draw(&mut self, shape: Shape, stroke: bool) -> anyhow::Result<()> {
+    pub fn draw(&mut self, shape: Shape, stroke: bool, erase: bool) -> anyhow::Result<()> {
         self.protocol.send(&Event::ScreenDraw {
             command: if stroke {
                 DrawCommand::Stroke { shape }
             } else {
                 DrawCommand::Fill { shape }
             },
-            color: self.display.foreground_color.into(),
-            background: self.display.background_color.into(),
+            color: if erase {
+                self.display.background_color
+            } else {
+                self.display.foreground_color
+            }
+            .into(),
+            clip_region: self.display.clip_region,
         })?;
         Ok(())
     }
@@ -404,9 +552,10 @@ impl<'a> DisplayCtx<'a> {
                 text,
                 location,
                 opaque,
+                background: self.display.background_color.into(),
             },
             color: self.display.foreground_color.into(),
-            background: self.display.background_color.into(),
+            clip_region: self.display.clip_region,
         })?;
         Ok(())
     }
@@ -430,6 +579,7 @@ impl<'a> DisplayCtx<'a> {
                     top_left: [0, 0].into(),
                     bottom_right: [DISPLAY_WIDTH, HEADER_HEIGHT].into(),
                 },
+                false,
                 false,
             )
         })?;
@@ -463,20 +613,15 @@ impl<'a> DisplayCtx<'a> {
         Ok(())
     }
 
-    /// Erases the display by filling it with the default background color.
+    /// Erases the display by filling it with the current background color.
     pub fn erase(&mut self) -> anyhow::Result<()> {
-        self.with_colors(
-            self.display.program_options.default_fg_color(),
-            BLACK,
-            |ctx| {
-                ctx.draw(
-                    Shape::Rectangle {
-                        top_left: [0, 0].into(),
-                        bottom_right: [DISPLAY_WIDTH, DISPLAY_HEIGHT].into(),
-                    },
-                    false,
-                )
+        self.draw(
+            Shape::Rectangle {
+                top_left: [0, 0].into(),
+                bottom_right: [DISPLAY_WIDTH, DISPLAY_HEIGHT].into(),
             },
+            false,
+            true,
         )?;
         Ok(())
     }
@@ -514,6 +659,8 @@ impl<'a> DisplayCtx<'a> {
         self.protocol.send(&Event::ScreenScroll {
             location: bounds,
             lines,
+            background: self.display.background_color.into(),
+            clip_region: self.display.clip_region,
         })?;
         Ok(())
     }
@@ -530,6 +677,7 @@ pub struct Display {
     text_metrics_cache: Option<(V5Text, TextMetrics)>,
     last_font_size: V5FontSize,
     double_buffered: bool,
+    clip_region: Rect,
 }
 
 impl Display {
@@ -542,6 +690,16 @@ impl Display {
             start_instant,
             last_font_size: V5FontSize::Normal,
             double_buffered: false,
+            clip_region: Rect {
+                top_left: Point2 {
+                    x: 0,
+                    y: HEADER_HEIGHT,
+                },
+                bottom_right: Point2 {
+                    x: DISPLAY_WIDTH,
+                    y: DISPLAY_HEIGHT,
+                },
+            },
         }
     }
 
