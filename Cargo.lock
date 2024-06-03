@@ -643,9 +643,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.84"
+version = "1.0.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec96c6a92621310b51366f1e28d05ef11489516e93be030060e5fc12024a49d6"
+checksum = "22244ce15aa966053a896d1accb3a6e68469b97c7f33f284b99f0d576879fc23"
 dependencies = [
  "unicode-ident",
 ]
@@ -966,7 +966,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "vexide-simulator-protocol"
 version = "0.1.0"
-source = "git+https://github.com/vexide/simulator-protocol.git#0455ec3fec28706a5c09e82fece67a10872163d6"
+source = "git+https://github.com/vexide/simulator-protocol.git#3e4be3231fc1cc87ea37edff2519abb3792b4101"
 dependencies = [
  "base64",
  "mint",

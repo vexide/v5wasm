@@ -3,6 +3,7 @@ use std::{collections::HashMap, ffi::CStr, time::Instant};
 use anyhow::bail;
 use bitflags::bitflags;
 
+use display::DisplayCtx;
 use serial::{build_serial_jump_table, Serial};
 use vexide_simulator_protocol::{Command, CompMode, CompetitionMode, Event, LogLevel};
 use wasmtime::*;
@@ -120,6 +121,10 @@ impl SdkState {
         self.inputs.update()?;
         self.serial.flush(&mut self.protocol)?;
         Ok(())
+    }
+
+    pub fn display_ctx(&mut self) -> DisplayCtx {
+        self.display.ctx(&mut self.protocol)
     }
 }
 

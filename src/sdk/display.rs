@@ -9,7 +9,8 @@ use base64::prelude::*;
 use mint::Point2;
 use rgb::RGB8;
 use vexide_simulator_protocol::{
-    Command, DrawCommand, Event, Shape, TextLocation, TextMetrics, V5FontFamily, V5FontSize, V5Text,
+    Command, DrawCommand, Event, ScrollLocation, Shape, TextLocation, TextMetrics, V5FontFamily,
+    V5FontSize, V5Text,
 };
 use wasmtime::*;
 
@@ -38,12 +39,89 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         };
     });
 
+    // vexDisplayErase
+    builder.insert(0x648, move |mut caller: Caller<'_, SdkState>| {
+        caller.data_mut().display_ctx().erase()?;
+        Ok(())
+    });
+
+    // vexDisplayScroll
+    builder.insert(
+        0x64c,
+        move |mut caller: Caller<'_, SdkState>, n_start_line: i32, n_lines: i32| {
+            caller
+                .data_mut()
+                .display_ctx()
+                .scroll(ScrollLocation::Line { line: n_start_line }, n_lines)?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayScrollRect
+    builder.insert(
+        0x650,
+        move |mut caller: Caller<'_, SdkState>,
+              x1: i32,
+              y1: i32,
+              x2: i32,
+              y2: i32,
+              n_lines: i32| {
+            caller.data_mut().display_ctx().scroll(
+                ScrollLocation::Rectangle {
+                    top_left: [x1, y1].into(),
+                    bottom_right: [x2, y2].into(),
+                },
+                n_lines,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayCopyRect
+    builder.insert(
+        0x654,
+        move |mut caller: Caller<'_, SdkState>,
+              x1: i32,
+              y1: i32,
+              x2: i32,
+              y2: i32,
+              buffer_ptr: u32,
+              stride: u32|
+              -> Result<()> {
+            let buffer_len = (x2 - x1) as usize * (y2 - y1) as usize * 4;
+            let buffer = memory.data(&mut caller)[buffer_ptr as usize..][..buffer_len].to_vec();
+
+            caller.data_mut().display_ctx().draw_buffer(
+                &buffer,
+                [x1, y1],
+                [x2, y2],
+                NonZeroU16::new(stride as u16)
+                    .with_context(|| format!("Unexpected stride value {stride:?}"))?,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayPixelSet
+    builder.insert(
+        0x658,
+        move |mut caller: Caller<'_, SdkState>, x: i32, y: i32| {
+            caller.data_mut().display_ctx().draw(
+                Shape::Rectangle {
+                    top_left: [x, y].into(),
+                    bottom_right: [x, y].into(),
+                },
+                false,
+            )?;
+            Ok(())
+        },
+    );
+
     // vexDisplayRectDraw
     builder.insert(
         0x668,
         move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
-            let sdk = caller.data_mut();
-            sdk.display.ctx(&mut sdk.protocol).draw(
+            caller.data_mut().display_ctx().draw(
                 Shape::Rectangle {
                     top_left: [x1, y1].into(),
                     bottom_right: [x2, y2].into(),
@@ -58,8 +136,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x670,
         move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
-            let sdk = caller.data_mut();
-            sdk.display.ctx(&mut sdk.protocol).draw(
+            caller.data_mut().display_ctx().draw(
                 Shape::Rectangle {
                     top_left: [x1, y1].into(),
                     bottom_right: [x2, y2].into(),
@@ -74,8 +151,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x674,
         move |mut caller: Caller<'_, SdkState>, cx: i32, cy: i32, radius: i32| {
-            let sdk = caller.data_mut();
-            sdk.display.ctx(&mut sdk.protocol).draw(
+            caller.data_mut().display_ctx().draw(
                 Shape::Circle {
                     center: [cx, cy].into(),
                     radius: radius as u16,
@@ -90,8 +166,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x67c,
         move |mut caller: Caller<'_, SdkState>, cx: i32, cy: i32, radius: i32| {
-            let sdk = caller.data_mut();
-            sdk.display.ctx(&mut sdk.protocol).draw(
+            caller.data_mut().display_ctx().draw(
                 Shape::Circle {
                     center: [cx, cy].into(),
                     radius: radius as u16,
@@ -107,17 +182,14 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         0x6c0,
         move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
             let string = clone_c_string!(string_ptr as usize, from caller using memory)?;
-            let sdk = caller.data_mut();
 
+            let sdk = caller.data_mut();
             let font_size = sdk.display.last_font_size;
-            let size = sdk
-                .display
-                .ctx(&mut sdk.protocol)
-                .get_text_metrics(V5Text {
-                    data: string,
-                    font_family: V5FontFamily::UserMono,
-                    font_size,
-                })?;
+            let size = sdk.display_ctx().get_text_metrics(V5Text {
+                data: string,
+                font_family: V5FontFamily::UserMono,
+                font_size,
+            })?;
             Ok(size.width as u32)
         },
     );
@@ -127,17 +199,14 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         0x6c4,
         move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
             let string = clone_c_string!(string_ptr as usize, from caller using memory)?;
-            let sdk = caller.data_mut();
 
+            let sdk = caller.data_mut();
             let font_size = sdk.display.last_font_size;
-            let size = sdk
-                .display
-                .ctx(&mut sdk.protocol)
-                .get_text_metrics(V5Text {
-                    data: string,
-                    font_family: V5FontFamily::UserMono,
-                    font_size,
-                })?;
+            let size = sdk.display_ctx().get_text_metrics(V5Text {
+                data: string,
+                font_family: V5FontFamily::UserMono,
+                font_size,
+            })?;
             Ok(size.height as u32)
         },
     );
@@ -146,10 +215,10 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x7a0,
         move |mut caller: Caller<'_, SdkState>, vsync_wait: i32, run_scheduler: i32| {
-            let sdk = caller.data_mut();
-            sdk.display.ctx(&mut sdk.protocol).render()?;
+            caller.data_mut().display_ctx().render()?;
             let vsync_finish = Instant::now() + Duration::from_secs_f64(1.0 / 60.0);
             if vsync_wait != 0 {
+                let sdk = caller.data_mut();
                 while Instant::now() < vsync_finish {
                     sleep(Duration::from_millis(1));
                     if run_scheduler != 0 {
@@ -163,10 +232,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
 
     // vexDisplayDoubleBufferDisable
     builder.insert(0x7a4, move |mut caller: Caller<'_, SdkState>| {
-        let sdk = caller.data_mut();
-        sdk.display
-            .ctx(&mut sdk.protocol)
-            .set_double_buffered(false)?;
+        caller.data_mut().display_ctx().set_double_buffered(false)?;
         Ok(())
     });
 
@@ -181,9 +247,8 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               _args: u32|
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            let sdk = caller.data_mut();
 
-            sdk.display.ctx(&mut sdk.protocol).write(
+            caller.data_mut().display_ctx().write(
                 V5Text {
                     data: format,
                     font_family: Default::default(),
@@ -207,9 +272,8 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               _args: u32|
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            let sdk = caller.data_mut();
 
-            sdk.display.ctx(&mut sdk.protocol).write(
+            caller.data_mut().display_ctx().write(
                 V5Text {
                     data: format,
                     font_family: Default::default(),
@@ -232,9 +296,8 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               _args: u32|
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            let sdk = caller.data_mut();
 
-            sdk.display.ctx(&mut sdk.protocol).write(
+            caller.data_mut().display_ctx().write(
                 V5Text {
                     data: format,
                     font_family: Default::default(),
@@ -259,9 +322,8 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               _args: u32|
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
-            let sdk = caller.data_mut();
 
-            sdk.display.ctx(&mut sdk.protocol).write(
+            caller.data_mut().display_ctx().write(
                 V5Text {
                     data: format,
                     font_family: Default::default(),
@@ -271,31 +333,6 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                     point: [x_pos, y_pos].into(),
                 },
                 true,
-            )?;
-            Ok(())
-        },
-    );
-
-    // vexDisplayCopyRect
-    builder.insert(
-        0x654,
-        move |mut caller: Caller<'_, SdkState>,
-              x1: i32,
-              y1: i32,
-              x2: i32,
-              y2: i32,
-              buffer_ptr: u32,
-              stride: u32|
-              -> Result<()> {
-            let buffer_len = (x2 - x1) as usize * (y2 - y1) as usize * 4;
-            let buffer = memory.data(&mut caller)[buffer_ptr as usize..][..buffer_len].to_vec();
-            let sdk = caller.data_mut();
-            sdk.display.ctx(&mut sdk.protocol).draw_buffer(
-                &buffer,
-                [x1, y1],
-                [x2, y2],
-                NonZeroU16::new(stride as u16)
-                    .with_context(|| format!("Unexpected stride value {stride:?}"))?,
             )?;
             Ok(())
         },
@@ -470,6 +507,14 @@ impl<'a> DisplayCtx<'a> {
     pub fn render(&mut self) -> anyhow::Result<()> {
         self.set_double_buffered(true)?;
         self.protocol.send(&Event::ScreenRender)?;
+        Ok(())
+    }
+
+    pub fn scroll(&mut self, bounds: ScrollLocation, lines: i32) -> anyhow::Result<()> {
+        self.protocol.send(&Event::ScreenScroll {
+            location: bounds,
+            lines,
+        })?;
         Ok(())
     }
 }
