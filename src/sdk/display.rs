@@ -291,18 +291,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
     builder.insert(
         0x794,
         move |mut caller: Caller<'_, SdkState>, x1: i32, y1: i32, x2: i32, y2: i32| {
-            caller.data_mut().display.clip_region = Rect {
-                top_left: [
-                    x1.clamp(0, DISPLAY_WIDTH),
-                    y1.clamp(HEADER_HEIGHT, DISPLAY_HEIGHT),
-                ]
-                .into(),
-                bottom_right: [
-                    x2.clamp(0, DISPLAY_WIDTH),
-                    y2.clamp(HEADER_HEIGHT, DISPLAY_HEIGHT),
-                ]
-                .into(),
-            };
+            caller.data_mut().display.set_clip_region(x1, y1, x2, y2);
             Ok(())
         },
     );
@@ -337,9 +326,11 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         0x7a8,
         move |mut caller: Caller<'_, SdkState>, index: i32, x1: i32, y1: i32, x2: i32, y2: i32| {
             if index != 0 {
-                warn_bt!(caller, "vexDisplayClipRegionSetWithIndex: index != 0");
+                warn_bt!(caller, "vexDisplayClipRegionSetWithIndex: the only supported index is 0, but got {index:?} instead")?;
                 return Ok(());
             }
+
+            caller.data_mut().display.set_clip_region(x1, y1, x2, y2);
 
             Ok(())
         },
@@ -712,5 +703,20 @@ impl Display {
 
     pub fn set_metrics_cache(&mut self, text: V5Text, metrics: TextMetrics) {
         self.text_metrics_cache = Some((text, metrics));
+    }
+
+    pub fn set_clip_region(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) {
+        self.clip_region = Rect {
+            top_left: [
+                x1.clamp(0, DISPLAY_WIDTH),
+                y1.clamp(HEADER_HEIGHT, DISPLAY_HEIGHT),
+            ]
+            .into(),
+            bottom_right: [
+                x2.clamp(0, DISPLAY_WIDTH),
+                y2.clamp(HEADER_HEIGHT, DISPLAY_HEIGHT),
+            ]
+            .into(),
+        };
     }
 }

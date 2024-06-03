@@ -154,10 +154,6 @@ impl Protocol {
 
 pub trait Log {
     fn log(&mut self, level: LogLevel, message: String) -> Result<()>;
-    fn wasm_backtrace(&mut self, level: LogLevel, store: impl AsContext) -> Result<()> {
-        let wasm_bt = WasmBacktrace::capture(store);
-        self.log(level, wasm_bt.to_string())
-    }
     fn trace(&mut self, message: impl Into<String>) -> Result<()> {
         self.log(LogLevel::Trace, message.into())
     }
@@ -180,7 +176,7 @@ impl Log for Protocol {
 
 macro_rules! warn_bt {
     ($ctx:expr, $($arg:tt)*) => {{
-        let bt = wasmtime::WasmBacktrace::capture($ctx);
+        let bt = wasmtime::WasmBacktrace::capture(&$ctx);
         $ctx.data_mut().warn(format!($($arg)*))?;
         $ctx.data_mut().warn(bt.to_string())?;
         Ok::<(), anyhow::Error>(())
@@ -188,3 +184,14 @@ macro_rules! warn_bt {
 }
 
 pub(crate) use warn_bt;
+
+macro_rules! error_bt {
+    ($ctx:expr, $($arg:tt)*) => {{
+        let bt = wasmtime::WasmBacktrace::capture(&$ctx);
+        $ctx.data_mut().error(format!($($arg)*))?;
+        $ctx.data_mut().error(bt.to_string())?;
+        Ok::<(), anyhow::Error>(())
+    }};
+}
+
+pub(crate) use error_bt;
