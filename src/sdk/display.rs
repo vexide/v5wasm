@@ -1,4 +1,6 @@
 use std::{
+    io::Cursor,
+    mem::size_of,
     num::NonZeroU16,
     thread::sleep,
     time::{Duration, Instant},
@@ -6,8 +8,12 @@ use std::{
 
 use anyhow::{bail, Context};
 use base64::prelude::*;
+use bytemuck::{NoUninit, Pod, Zeroable};
+use bytes::{Buf, Bytes, BytesMut};
+use embedded_graphics_core::{geometry::Dimensions, pixelcolor::Rgb888};
 use mint::Point2;
 use rgb::RGB8;
+use tinybmp::Bmp;
 use vexide_simulator_protocol::{
     Command, DrawCommand, Event, LogLevel, Rect, ScrollLocation, Shape, TextLocation, TextMetrics,
     V5FontFamily, V5FontSize, V5Text,
@@ -22,6 +28,16 @@ use crate::{
 use super::{clone_c_string, JumpTableBuilder, MemoryExt, SdkState};
 
 // MARK: Jump Table
+
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Pod, Zeroable)]
+#[allow(non_camel_case_types)]
+struct V5Image {
+    pub width: u16,
+    pub height: u16,
+    pub data: u32,
+    pub p: u32,
+}
 
 pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) {
     // vexDisplayForegroundColor
@@ -333,6 +349,50 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
             caller.data_mut().display.set_clip_region(x1, y1, x2, y2);
 
             Ok(())
+        },
+    );
+
+    // vexImageBmpRead
+    builder.insert(
+        0x990,
+        move |mut caller: Caller<'_, SdkState>,
+              i_buf: u32,
+              o_buf: u32,
+              maxw: u32,
+              maxh: u32|
+              -> Result<u32> {
+            // TODO: determine what the return value is - assuming its an error code for now
+                if i_buf == 0 {
+                    warn_bt!(caller, "vexImageBmpRead: ibuf must not be null")?;
+                    return Ok(u32::MAX);
+                }
+                if o_buf == 0 {
+                    warn_bt!(caller, "vexImageBmpRead: oBuf must not be null")?;
+                    return Ok(u32::MAX);
+                }
+
+            let bmp = {
+                let i_buf_mem = &memory.data(&mut caller)[i_buf as usize..];
+                match Bmp::<Rgb888>::from_slice(i_buf_mem) {
+                    Ok(bmp) => bmp.to_owned(),
+                    Err(err) => {
+                        warn_bt!(caller, "vexImageBmpRead: failed to read BMP: {err:?}")?;
+                        return Ok(u32::MAX);
+                    }
+                }
+            };
+
+            let size = bmp.bounding_box().size;
+            let pixels = bmp.as_raw().image_data().to_vec();
+
+            let mut o_buf = {
+                let o_buf_mem = &memory.data_mut(&mut caller)[o_buf as usize..][..size_of::<V5Image>()];
+                bytemuck::from_bytes_mut::<V5Image>(bytes)
+            };
+            o_buf.width = (size.width as u16).to_le();
+            o_buf.height = (size.height as u16).to_le();
+            o_buf.data =
+            Ok(0)
         },
     );
 

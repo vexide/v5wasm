@@ -7,10 +7,11 @@ edition = "2021"
 anyhow = "1.0.82"
 base64 = "0.22.1"
 bitflags = "2.5.0"
-bytemuck = "1.16.0"
+bytemuck = { version = "1.16.0", features = ["derive"] }
 bytes = "1.6.0"
 clap = { version = "4.5.4", features = ["derive"] }
 ctrlc = "3.4.4"
+embedded-graphics-core = "0.4.0"
 fs-err = "2.11.0"
 jsonl = "4.0.1"
 mint = "0.5.9"
@@ -18,6 +19,7 @@ rgb = "0.8.37"
 rusttype = "0.9.3"
 sdl2 = { version = "0.36.0", features = ["bundled", "static-link"] }
 snafu = "0.8.3"
+tinybmp = "0.5.0"
 vexide-simulator-protocol = { git = "https://github.com/vexide/simulator-protocol.git", version = "0.1.0" }
 wasmparser = "0.207.0"
 wasmtime = { version = "21.0.1", default-features = false, features = [
