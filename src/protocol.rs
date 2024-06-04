@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    io::{stdin, stdout, StdoutLock},
+    io::{stdin, stdout, Stdout, StdoutLock},
     sync::mpsc::{self, TryRecvError},
 };
 
@@ -34,14 +34,14 @@ pub type Result<T, E = ProtocolError> = std::result::Result<T, E>;
 
 pub struct Protocol {
     handshake_finished: bool,
-    outbound: StdoutLock<'static>,
+    outbound: Stdout,
     pub inbound: mpsc::Receiver<Result<Command, jsonl::ReadError>>,
     command_process_queue: VecDeque<Command>,
 }
 
 impl Protocol {
     pub fn open() -> Self {
-        let stdout_lock = stdout().lock();
+        let stdout = stdout();
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || loop {
             let stdin_lock = stdin().lock();
@@ -58,7 +58,7 @@ impl Protocol {
 
         Self {
             handshake_finished: false,
-            outbound: stdout_lock,
+            outbound: stdout,
             inbound: rx,
             command_process_queue: VecDeque::new(),
         }

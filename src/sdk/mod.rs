@@ -1,12 +1,16 @@
-use std::{collections::HashMap, ffi::CStr, time::Instant};
+use std::{collections::HashMap, ffi::CStr, sync::mpsc, time::Instant};
 
 use anyhow::bail;
 use bitflags::bitflags;
 
+use component::ResourceTable;
+
 use display::DisplayCtx;
+use sdl2::EventPump;
 use serial::{build_serial_jump_table, Serial};
 use vexide_simulator_protocol::{Command, CompMode, CompetitionMode, Event, LogLevel};
 use wasmtime::*;
+use wasmtime_wasi::{WasiCtx, WasiView};
 
 use crate::{
     protocol::{self, Log, Protocol},
@@ -22,6 +26,8 @@ mod controller;
 pub mod display;
 mod serial;
 
+pub use controller::SdlRequest;
+
 /// The state of the SDK, containing the program's WASM module, the robot display, and other peripherals.
 pub struct SdkState {
     module: Module,
@@ -33,22 +39,32 @@ pub struct SdkState {
     protocol: Protocol,
     is_executing: bool,
     serial: Serial,
+    wasi: WasiCtx,
+    resources: ResourceTable,
 }
 
 impl SdkState {
-    pub fn new(module: Module, program_options: ProgramOptions, protocol: Protocol) -> Self {
-        let sdl = sdl2::init().unwrap();
+    pub fn new(
+        module: Module,
+        program_options: ProgramOptions,
+        protocol: Protocol,
+        sdl_request_channel: mpsc::Sender<SdlRequest>,
+    ) -> Self {
         let start = Instant::now();
         SdkState {
             module,
             display: Display::new(program_options, start),
             program_options,
-            inputs: Inputs::new(sdl),
+            inputs: Inputs::new(sdl_request_channel),
             program_start: start,
             competition_mode: CompetitionMode::default(),
             protocol,
             is_executing: false,
             serial: Serial::new(),
+            wasi: WasiCtx::builder()
+                .allow_blocking_current_thread(true)
+                .build(),
+            resources: ResourceTable::new(),
         }
     }
 
@@ -132,6 +148,16 @@ impl Log for SdkState {
     fn log(&mut self, level: LogLevel, message: String) -> protocol::Result<()> {
         self.protocol.send(&Event::Log { level, message })?;
         Ok(())
+    }
+}
+
+impl WasiView for SdkState {
+    fn ctx(&mut self) -> &mut WasiCtx {
+        &mut self.wasi
+    }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.resources
     }
 }
 

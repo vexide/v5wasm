@@ -1,3 +1,5 @@
+use std::sync::mpsc;
+
 use anyhow::{anyhow, Context};
 use sdl2::{
     controller::{Axis, Button, GameController},
@@ -147,23 +149,26 @@ pub fn build_controller_jump_table(memory: Memory, builder: &mut JumpTableBuilde
 pub struct V5Controller {
     pub current_state: ControllerState,
     pub sdl_guid: Option<Guid>,
-    pub sdl_controller: Option<GameController>,
+}
+
+pub enum SdlRequest {
+    V5Controller {
+        guid: Guid,
+        response: oneshot::Sender<Result<Option<ControllerState>>>,
+    },
+    EventPump,
 }
 
 pub struct Inputs {
     controllers: [Option<V5Controller>; 2],
-    controller_subsystem: GameControllerSubsystem,
-    joystick_subsystem: JoystickSubsystem,
-    event_pump: EventPump,
+    request_channel: mpsc::Sender<SdlRequest>,
 }
 
 impl Inputs {
-    pub fn new(sdl: Sdl) -> Self {
+    pub fn new(request_channel: mpsc::Sender<SdlRequest>) -> Self {
         Inputs {
             controllers: Default::default(),
-            event_pump: sdl.event_pump().unwrap(),
-            joystick_subsystem: sdl.joystick().unwrap(),
-            controller_subsystem: sdl.game_controller().unwrap(),
+            request_channel,
         }
     }
 
@@ -182,7 +187,6 @@ impl Inputs {
                 let controller = match update {
                     ControllerUpdate::Raw(state) => V5Controller {
                         current_state: state,
-                        sdl_controller: None,
                         sdl_guid: None,
                     },
                     ControllerUpdate::UUID(uuid) => V5Controller {
@@ -210,7 +214,6 @@ impl Inputs {
                             flags: 0,
                             battery_capacity: 0,
                         },
-                        sdl_controller: None,
                         sdl_guid: Some(Guid::from_string(&uuid)?),
                     },
                 };
@@ -228,73 +231,39 @@ impl Inputs {
     ///
     /// Fails if the id is invalid.
     pub fn connected(&mut self, id: u32) -> Result<bool> {
-        Ok(self.controller(id, false)?.is_some())
+        Ok(self.controller(id, true)?.is_some())
     }
 
-    // /// Find a suitable game controller for the given index.
-    // fn find_suitable_controller_id(&self, mut id: usize) -> Option<GameController> {
-    //     for index in 0..self.subsystem.num_joysticks().ok()? {
-    //         if self.subsystem.is_game_controller(index) {
-    //             let Ok(controller) = self.subsystem.open(index) else {
-    //                 continue;
-    //             };
-    //             if !controller.attached() {
-    //                 continue;
-    //             }
-    //             if id == 0 {
-    //                 return Some(controller);
-    //             } else {
-    //                 id -= 1;
-    //             }
-    //         }
-    //     }
-    //     None
-    // }
-
-    /// Get the connected controller for the given index, or try to connect a new one if it is not connected.
-    pub fn controller(&mut self, id: u32, discover: bool) -> Result<Option<&mut V5Controller>> {
+    /// Get the last known state for the given controller.
+    ///
+    /// If `lazy` is false, the function will communicate with the main thread to get new states for
+    /// controllers managed by SDL2.
+    pub fn controller(&mut self, id: u32, lazy: bool) -> Result<Option<&mut V5Controller>> {
         if id >= self.controllers.len() as u32 {
-            anyhow::bail!("Invalid controller id")
+            anyhow::bail!("Invalid controller id");
         }
 
         let Some(controller) = self.controllers[id as usize].as_mut() else {
             return Ok(None);
         };
-        if let Some(guid) = &controller.sdl_guid {
-            // If the frontend provided a controller ID, the sim controller is only connected if the physical controller it refers to is connected.
-            if let Some(sdl_controller) = &mut controller.sdl_controller {
-                if sdl_controller.attached() {
-                    return Ok(Some(controller));
-                } else {
-                    controller.sdl_controller = None;
-                }
+        if lazy {
+            return Ok(Some(controller));
+        }
+        if let Some(guid) = controller.sdl_guid.clone() {
+            let (tx, rx) = oneshot::channel();
+            let request = SdlRequest::V5Controller { guid, response: tx };
+            self.request_channel.send(request).ok();
+            let res = rx.recv().map_err(|_| {
+                anyhow!("Controller request failed: main thread is not listening")
+            })??;
+
+            // If this is None the frontend wants to use a controller even as
+            // there is no physical controller connected to the system, so we're
+            // left returning a constant controller state.
+            if let Some(res) = res {
+                controller.current_state = res;
             }
-
-            // At this point the SDL controller isn't valid so we try and discover one with that GUID.
-            if discover {
-                let joysticks = self
-                    .controller_subsystem
-                    .num_joysticks()
-                    .map_err(|s| anyhow!(s))?;
-                for idx in 0..joysticks {
-                    if self.controller_subsystem.is_game_controller(idx) {
-                        let Ok(joystick) = self.joystick_subsystem.open(idx) else {
-                            continue;
-                        };
-                        if &joystick.guid() != guid || !joystick.attached() {
-                            continue;
-                        }
-                        let Ok(sdl_controller) = self.controller_subsystem.open(idx) else {
-                            continue;
-                        };
-
-                        controller.sdl_controller = Some(sdl_controller);
-                        return Ok(Some(controller));
-                    }
-                }
-            }
-
-            Ok(None)
+            Ok(Some(controller))
         } else {
             // The frontend didn't provide a controller ID for updating it so we're just left with a constant controller state.
             Ok(Some(controller))
@@ -303,42 +272,12 @@ impl Inputs {
 
     /// Get new events from the SDL event pump and update the SDK's representation of the controller states.
     pub fn update(&mut self) -> anyhow::Result<()> {
-        self.event_pump.pump_events();
+        self.request_channel
+            .send(SdlRequest::EventPump)
+            .map_err(|_| anyhow!("Event pump request failed: main thread is not listening"))?;
 
         for index in 0..self.controllers.len() {
-            if let Some(controller) = self.controller(index as u32, true)? {
-                if let Some(sdl_controller) = &controller.sdl_controller {
-                    controller.current_state.axis1 =
-                        (sdl_controller.axis(Axis::LeftX) as i32) * 127 / (i16::MAX as i32);
-                    controller.current_state.axis2 =
-                        -(sdl_controller.axis(Axis::LeftY) as i32) * 127 / (i16::MAX as i32);
-                    controller.current_state.axis3 =
-                        -(sdl_controller.axis(Axis::RightY) as i32) * 127 / (i16::MAX as i32);
-                    controller.current_state.axis4 =
-                        (sdl_controller.axis(Axis::RightX) as i32) * 127 / (i16::MAX as i32);
-                    controller.current_state.button_l1 =
-                        sdl_controller.button(Button::LeftShoulder);
-                    controller.current_state.button_l2 = sdl_controller.axis(Axis::TriggerLeft) > 0;
-                    controller.current_state.button_r1 =
-                        sdl_controller.button(Button::RightShoulder);
-                    controller.current_state.button_r2 =
-                        sdl_controller.axis(Axis::TriggerRight) > 0;
-                    controller.current_state.button_up = sdl_controller.button(Button::DPadUp);
-                    controller.current_state.button_down = sdl_controller.button(Button::DPadDown);
-                    controller.current_state.button_left = sdl_controller.button(Button::DPadLeft);
-                    controller.current_state.button_right =
-                        sdl_controller.button(Button::DPadRight);
-                    controller.current_state.button_x = sdl_controller.button(Button::X);
-                    controller.current_state.button_b = sdl_controller.button(Button::B);
-                    controller.current_state.button_y = sdl_controller.button(Button::Y);
-                    controller.current_state.button_a = sdl_controller.button(Button::A);
-                }
-                // self.states[index].button_sel = controller.button(Button::Start);
-                // self.states[index].battery_level =
-                // self.states[index].button_all =
-                // self.states[index].flags =
-                // self.states[index].battery_capacity =
-            }
+            self.controller(index as u32, true)?;
         }
 
         Ok(())

@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
+};
 
 use anyhow::Context;
 use bytes::{Buf, Bytes};
@@ -7,7 +11,11 @@ use fs_err as fs;
 
 use protocol::{Log, Protocol};
 use rgb::RGB8;
-use sdk::display::{BLACK, WHITE};
+use sdk::{
+    display::{BLACK, WHITE},
+    SdlRequest,
+};
+use sdl2::EventPump;
 use vexide_simulator_protocol::{Command, Event, VCodeSig};
 use wasmparser::{Parser, Payload};
 use wasmtime::*;
@@ -127,18 +135,7 @@ fn load_program(
     Ok((module, cold_header))
 }
 
-fn main() -> Result<()> {
-    ctrlc::set_handler(move || {
-        std::process::exit(0);
-    })
-    .unwrap();
-
-    let args = Args::parse();
-
-    // This is required for certain controllers to work on Windows without the
-    // video subsystem enabled:
-    sdl2::hint::set("SDL_JOYSTICK_THREAD", "1");
-
+fn start(args: Args, sdl_request_channel: mpsc::Sender<SdlRequest>) -> Result<()> {
     let mut protocol = Protocol::open();
     protocol.handshake(args.imply_start)?;
 
@@ -153,7 +150,7 @@ fn main() -> Result<()> {
 
     protocol.info("Booting...")?;
 
-    let state = SdkState::new(module.clone(), cold_header, protocol);
+    let state = SdkState::new(module.clone(), cold_header, protocol, sdl_request_channel);
 
     let mut store = Store::new(&engine, state);
 
@@ -204,6 +201,42 @@ fn main() -> Result<()> {
     // We should be ready to actually run the entrypoint now.
     store.data_mut().trace("Calling _entry()")?;
     run.call(&mut store, ())?;
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    ctrlc::set_handler(move || {
+        std::process::exit(0);
+    })
+    .unwrap();
+
+    let args = Args::parse();
+
+    // This is required for certain controllers to work on Windows without the
+    // video subsystem enabled:
+    sdl2::hint::set("SDL_JOYSTICK_THREAD", "1");
+
+    let sdl = sdl2::init().unwrap();
+    let (tx, rx) = mpsc::channel();
+
+    let mut event_pump = sdl.event_pump().unwrap();
+    let joystick_subsystem = sdl.joystick().unwrap();
+    let controller_subsystem = sdl.game_controller().unwrap();
+
+    thread::spawn(move || {
+        start(args, tx).unwrap();
+    });
+
+    while let Ok(req) = rx.recv() {
+        match req {
+            SdlRequest::EventPump => {
+                event_pump.pump_events();
+            }
+            SdlRequest::V5Controller { guid, response } => {
+                todo!();
+            }
+        }
+    }
 
     Ok(())
 }

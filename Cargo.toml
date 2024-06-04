@@ -16,6 +16,7 @@ fs-err = "2.11.0"
 image = { version = "0.25.1", default-features = false, features = ["png", "rayon"] }
 jsonl = "4.0.1"
 mint = "0.5.9"
+oneshot = "0.1.7"
 rgb = "0.8.37"
 rusttype = "0.9.3"
 sdl2 = { version = "0.36.0", features = ["bundled", "static-link"] }
@@ -35,3 +36,4 @@ wasmtime = { version = "21.0.1", default-features = false, features = [
     "debug-builtins",
     "runtime",
 ] }
+wasmtime-wasi = "21.0.1"
