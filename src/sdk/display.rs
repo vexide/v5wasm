@@ -406,7 +406,7 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
             }
 
             if size.height > maxh {
-                warn_bt!(caller, "vexImageBmpRead: image has {:?}px height but the specified max width was {maxh:?}", size.height)?;
+                warn_bt!(caller, "vexImageBmpRead: image has {:?}px height but the specified max height was {maxh:?}", size.height)?;
                 return Ok(0);
             }
 
