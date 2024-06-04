@@ -399,6 +399,17 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
             };
 
             let size = bmp.bounding_box().size;
+
+            if size.width > maxw {
+                warn_bt!(caller, "vexImageBmpRead: image has {:?}px width but the specified max width was {maxw:?}", size.width)?;
+                return Ok(0);
+            }
+
+            if size.height > maxh {
+                warn_bt!(caller, "vexImageBmpRead: image has {:?}px height but the specified max width was {maxh:?}", size.height)?;
+                return Ok(0);
+            }
+
             let mut bytes = Bytes::from_iter(
                 bmp.pixels()
                     .flat_map(|p| RawU24::from(p.1).into_inner().to_le_bytes()),
