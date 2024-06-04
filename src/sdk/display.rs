@@ -17,6 +17,7 @@ use embedded_graphics_core::{
         Rgb888,
     },
 };
+use image::{codecs::png::PngDecoder, open, DynamicImage, ImageDecoder, RgbImage};
 use mint::Point2;
 use rgb::RGB8;
 use tinybmp::Bmp;
@@ -432,6 +433,78 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
 
             memory.data_mut(&mut caller)[o_buf as usize..][..size_of::<V5Image>()]
                 .copy_from_slice(bytemuck::bytes_of(&img));
+            Ok(1)
+        },
+    );
+
+    // vexImagePngRead
+    builder.insert(
+        0x994,
+        move |mut caller: Caller<'_, SdkState>,
+              i_buf: u32,
+              o_buf: u32,
+              maxw: u32,
+              maxh: u32,
+              i_buf_len: u32|
+              -> Result<u32> {
+            if i_buf == 0 {
+                warn_bt!(caller, "vexImagePngRead: ibuf must not be null")?;
+                return Ok(0);
+            }
+            if o_buf == 0 {
+                warn_bt!(caller, "vexImagePngRead: oBuf must not be null")?;
+                return Ok(0);
+            }
+
+            let mut img = {
+                let o_buf_mem =
+                    &mut memory.data_mut(&mut caller)[o_buf as usize..][..size_of::<V5Image>()];
+                *bytemuck::from_bytes_mut::<V5Image>(o_buf_mem)
+            };
+
+            if img.data == 0 {
+                warn_bt!(caller, "vexImagePngRead: oBuf data field must not be null")?;
+                return Ok(0);
+            }
+
+                let i_buf_mem = &memory.data(&mut caller)[i_buf as usize..][..i_buf_len as usize];
+                let Ok(png) = PngDecoder::new(Cursor::new(i_buf_mem)) else {
+                    warn_bt!(caller, "vexImagePngRead: failed to read PNG")?;
+                    return Ok(0);
+                };
+                let (width, height) = png.dimensions();
+                if width > maxw {
+                    warn_bt!(caller, "vexImagePngRead: image has {width:?}px width but the specified max width was {maxw:?}")?;
+                    return Ok(0);
+                }
+                if height > maxh {
+                    warn_bt!(caller, "vexImagePngRead: image has {height:?}px height but the specified max height was {maxh:?}")?;
+                    return Ok(0);
+                }
+                let Ok(image) = DynamicImage::from_decoder(png) else {
+                    warn_bt!(caller, "vexImagePngRead: failed to decode PNG")?;
+                    return Ok(0);
+                };
+                let rgb_image = image.to_rgb8();
+                let data = rgb_image.into_raw();
+
+            let bytes_len = data.len();
+            let max_len = (maxw * maxh * 4) as usize;
+            if bytes_len > max_len {
+                warn_bt!(caller, "vexImagePngRead: image has {bytes_len:?} bytes but the output buffer only has space for {max_len:?} bytes")?;
+                return Ok(0);
+            }
+
+            let data_ptr = u32::from_le(img.data);
+            let out_data = &mut memory.data_mut(&mut caller)[(data_ptr as usize)..][..data.len()];
+            out_data.copy_from_slice(&data);
+
+            img.width = (width as u16).to_le();
+            img.height = (height as u16).to_le();
+
+            memory.data_mut(&mut caller)[o_buf as usize..][..size_of::<V5Image>()]
+                .copy_from_slice(bytemuck::bytes_of(&img));
+
             Ok(1)
         },
     );

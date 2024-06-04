@@ -13,6 +13,7 @@ clap = { version = "4.5.4", features = ["derive"] }
 ctrlc = "3.4.4"
 embedded-graphics-core = "0.4.0"
 fs-err = "2.11.0"
+image = { version = "0.25.1", default-features = false, features = ["png", "rayon"] }
 jsonl = "4.0.1"
 mint = "0.5.9"
 rgb = "0.8.37"
