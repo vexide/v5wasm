@@ -8,7 +8,7 @@ use fs_err as fs;
 use protocol::{Log, Protocol};
 use rgb::RGB8;
 use sdk::display::{BLACK, WHITE};
-use vexide_simulator_protocol::{Event, VCodeSig};
+use vexide_simulator_protocol::{Command, Event, VCodeSig};
 use wasmparser::{Parser, Payload};
 use wasmtime::*;
 
@@ -31,6 +31,9 @@ const HEADER_MAGIC: &[u8] = b"XVX5";
 struct Args {
     /// The path to the WebAssembly robot program that will be executed.
     program: PathBuf,
+    /// Skips the protocol handshake and immediately starts execution.
+    #[clap(long, short = 'I')]
+    imply_start: bool,
 }
 
 // const PROGRAM_TYPE_USER: u32 = 0;
@@ -137,7 +140,7 @@ fn main() -> Result<()> {
     sdl2::hint::set("SDL_JOYSTICK_THREAD", "1");
 
     let mut protocol = Protocol::open();
-    protocol.handshake()?;
+    protocol.handshake(args.imply_start)?;
 
     protocol.info("Compiling...")?;
     let engine = Engine::new(
@@ -194,6 +197,9 @@ fn main() -> Result<()> {
     jump_table.expose(&mut store, &table, &memory)?;
 
     let run = instance.get_typed_func::<(), ()>(&mut store, "_entry")?;
+    if args.imply_start {
+        store.data_mut().execute_command(Command::StartExecution)?;
+    }
     store.data_mut().setup()?;
     // We should be ready to actually run the entrypoint now.
     store.data_mut().trace("Calling _entry()")?;

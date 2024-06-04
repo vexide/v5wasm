@@ -103,10 +103,16 @@ impl Protocol {
         Ok(msg)
     }
 
-    pub fn handshake(&mut self) -> Result<()> {
+    pub fn handshake(&mut self, implied: bool) -> Result<()> {
         if self.handshake_finished {
             panic!("Attempted to perform handshake twice");
         }
+
+        if implied {
+            self.handshake_finished = true;
+            return Ok(());
+        }
+
         const COMPATIBLE_PROTOCOL_VERSION: i32 = 1;
 
         let handshake = self.next()?;

@@ -10,7 +10,13 @@ use anyhow::{bail, Context};
 use base64::prelude::*;
 use bytemuck::{NoUninit, Pod, Zeroable};
 use bytes::{Buf, Bytes, BytesMut};
-use embedded_graphics_core::{geometry::Dimensions, pixelcolor::Rgb888};
+use embedded_graphics_core::{
+    geometry::Dimensions,
+    pixelcolor::{
+        raw::{RawData, RawU24},
+        Rgb888,
+    },
+};
 use mint::Point2;
 use rgb::RGB8;
 use tinybmp::Bmp;
@@ -361,15 +367,25 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               maxw: u32,
               maxh: u32|
               -> Result<u32> {
-            // TODO: determine what the return value is - assuming its an error code for now
-                if i_buf == 0 {
-                    warn_bt!(caller, "vexImageBmpRead: ibuf must not be null")?;
-                    return Ok(u32::MAX);
-                }
-                if o_buf == 0 {
-                    warn_bt!(caller, "vexImageBmpRead: oBuf must not be null")?;
-                    return Ok(u32::MAX);
-                }
+            if i_buf == 0 {
+                warn_bt!(caller, "vexImageBmpRead: ibuf must not be null")?;
+                return Ok(0);
+            }
+            if o_buf == 0 {
+                warn_bt!(caller, "vexImageBmpRead: oBuf must not be null")?;
+                return Ok(0);
+            }
+
+            let mut img = {
+                let o_buf_mem =
+                    &mut memory.data_mut(&mut caller)[o_buf as usize..][..size_of::<V5Image>()];
+                *bytemuck::from_bytes_mut::<V5Image>(o_buf_mem)
+            };
+
+            if img.data == 0 {
+                warn_bt!(caller, "vexImageBmpRead: oBuf data field must not be null")?;
+                return Ok(0);
+            }
 
             let bmp = {
                 let i_buf_mem = &memory.data(&mut caller)[i_buf as usize..];
@@ -377,22 +393,35 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                     Ok(bmp) => bmp.to_owned(),
                     Err(err) => {
                         warn_bt!(caller, "vexImageBmpRead: failed to read BMP: {err:?}")?;
-                        return Ok(u32::MAX);
+                        return Ok(0);
                     }
                 }
             };
 
             let size = bmp.bounding_box().size;
-            let pixels = bmp.as_raw().image_data().to_vec();
+            let mut bytes = Bytes::from_iter(
+                bmp.pixels()
+                    .flat_map(|p| RawU24::from(p.1).into_inner().to_le_bytes()),
+            );
 
-            let mut o_buf = {
-                let o_buf_mem = &memory.data_mut(&mut caller)[o_buf as usize..][..size_of::<V5Image>()];
-                bytemuck::from_bytes_mut::<V5Image>(bytes)
-            };
-            o_buf.width = (size.width as u16).to_le();
-            o_buf.height = (size.height as u16).to_le();
-            o_buf.data =
-            Ok(0)
+            let bytes_len = bytes.len();
+            let max_len = (maxw * maxh * 4) as usize;
+            if bytes_len > max_len {
+                warn_bt!(caller, "vexImageBmpRead: image has {bytes_len:?} bytes but the output buffer only has space for {max_len:?} bytes")?;
+                return Ok(0);
+            }
+
+            let data_ptr = u32::from_le(img.data);
+            let out_data = &mut memory.data_mut(&mut caller)[(data_ptr as usize)..][..bytes.len()];
+            bytes.copy_to_slice(out_data);
+
+            img.width = (size.width as u16).to_le();
+            img.height = (size.height as u16).to_le();
+            img.p = (data_ptr + (size.width * 4)).to_le();
+
+            memory.data_mut(&mut caller)[o_buf as usize..][..size_of::<V5Image>()]
+                .copy_from_slice(bytemuck::bytes_of(&img));
+            Ok(1)
         },
     );
 
