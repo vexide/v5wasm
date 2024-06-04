@@ -467,26 +467,26 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                 return Ok(0);
             }
 
-                let i_buf_mem = &memory.data(&mut caller)[i_buf as usize..][..i_buf_len as usize];
-                let Ok(png) = PngDecoder::new(Cursor::new(i_buf_mem)) else {
-                    warn_bt!(caller, "vexImagePngRead: failed to read PNG")?;
-                    return Ok(0);
-                };
-                let (width, height) = png.dimensions();
-                if width > maxw {
-                    warn_bt!(caller, "vexImagePngRead: image has {width:?}px width but the specified max width was {maxw:?}")?;
-                    return Ok(0);
-                }
-                if height > maxh {
-                    warn_bt!(caller, "vexImagePngRead: image has {height:?}px height but the specified max height was {maxh:?}")?;
-                    return Ok(0);
-                }
-                let Ok(image) = DynamicImage::from_decoder(png) else {
-                    warn_bt!(caller, "vexImagePngRead: failed to decode PNG")?;
-                    return Ok(0);
-                };
-                let rgb_image = image.to_rgb8();
-                let data = rgb_image.into_raw();
+            let i_buf_mem = &memory.data(&mut caller)[i_buf as usize..][..i_buf_len as usize];
+            let Ok(png) = PngDecoder::new(Cursor::new(i_buf_mem)) else {
+                warn_bt!(caller, "vexImagePngRead: failed to read PNG")?;
+                return Ok(0);
+            };
+            let (width, height) = png.dimensions();
+            if width > maxw {
+                warn_bt!(caller, "vexImagePngRead: image has {width:?}px width but the specified max width was {maxw:?}")?;
+                return Ok(0);
+            }
+            if height > maxh {
+                warn_bt!(caller, "vexImagePngRead: image has {height:?}px height but the specified max height was {maxh:?}")?;
+                return Ok(0);
+            }
+            let Ok(image) = DynamicImage::from_decoder(png) else {
+                warn_bt!(caller, "vexImagePngRead: failed to decode PNG")?;
+                return Ok(0);
+            };
+            let rgb_image = image.to_rgb8();
+            let data = rgb_image.into_raw();
 
             let bytes_len = data.len();
             let max_len = (maxw * maxh * 4) as usize;
