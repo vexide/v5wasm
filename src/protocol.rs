@@ -1,13 +1,12 @@
 use std::{
     collections::VecDeque,
-    io::{stdin, stdout, Stdout, StdoutLock},
+    io::{stdin, stdout, Stdout},
     sync::mpsc::{self, TryRecvError},
 };
 
 use jsonl::ReadError;
 use snafu::{OptionExt, ResultExt, Snafu};
 use vexide_simulator_protocol::{Command, Event, LogLevel};
-use wasmtime::{AsContext, WasmBacktrace};
 
 #[derive(Debug, Snafu)]
 pub enum ProtocolError {
@@ -200,4 +199,3 @@ macro_rules! error_bt {
     }};
 }
 
-pub(crate) use error_bt;

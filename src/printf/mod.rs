@@ -28,14 +28,13 @@
 
 pub mod output;
 mod parser;
-use std::{ffi::CStr, mem::size_of, str::Utf8Error};
+use std::{ffi::CStr, mem::size_of};
 
 use argument::*;
 use bytemuck::{AnyBitPattern, NoUninit};
 pub use parser::format;
 use wasmtime::{AsContext, AsContextMut, Memory};
 
-use crate::sdk::MemoryExt;
 
 #[derive(Debug, Clone)]
 pub struct WasmVaList {
@@ -73,7 +72,7 @@ impl WasmVaList {
 pub mod argument {
     use std::{ffi::*, fmt};
 
-    use super::*;
+    
 
     bitflags::bitflags! {
         /// Flags field.

@@ -2,9 +2,7 @@ use std::sync::mpsc;
 
 use anyhow::{anyhow, Context};
 use sdl2::{
-    controller::{Axis, Button, GameController},
     joystick::Guid,
-    EventPump, GameControllerSubsystem, JoystickSubsystem, Sdl,
 };
 use vexide_simulator_protocol::{ControllerState, ControllerUpdate};
 use wasmtime::*;

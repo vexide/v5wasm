@@ -8,8 +8,8 @@ use std::{
 
 use anyhow::{bail, Context};
 use base64::prelude::*;
-use bytemuck::{NoUninit, Pod, Zeroable};
-use bytes::{Buf, Bytes, BytesMut};
+use bytemuck::{Pod, Zeroable};
+use bytes::{Buf, Bytes};
 use embedded_graphics_core::{
     geometry::Dimensions,
     pixelcolor::{
@@ -17,12 +17,12 @@ use embedded_graphics_core::{
         Rgb888,
     },
 };
-use image::{codecs::png::PngDecoder, open, DynamicImage, ImageDecoder, RgbImage};
+use image::{codecs::png::PngDecoder, DynamicImage, ImageDecoder};
 use mint::Point2;
 use rgb::RGB8;
 use tinybmp::Bmp;
 use vexide_simulator_protocol::{
-    Command, DrawCommand, Event, LogLevel, Rect, ScrollLocation, Shape, TextLocation, TextMetrics,
+    Command, DrawCommand, Event, Rect, ScrollLocation, Shape, TextLocation, TextMetrics,
     V5FontFamily, V5FontSize, V5Text,
 };
 use wasmtime::*;

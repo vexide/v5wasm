@@ -1,4 +1,4 @@
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{Cursor, Seek, SeekFrom, Write};
 
 use anyhow::{anyhow, bail, Context};
 use vexide_simulator_protocol::{Event, SerialData};

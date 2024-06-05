@@ -17,7 +17,6 @@ use sdk::{
 };
 use sdl2::{
     controller::{Axis, Button},
-    EventPump,
 };
 use vexide_simulator_protocol::{Command, ControllerState, Event, VCodeSig};
 use wasmparser::{Parser, Payload};

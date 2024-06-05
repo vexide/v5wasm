@@ -11,7 +11,6 @@ use bitflags::bitflags;
 use component::ResourceTable;
 
 use display::DisplayCtx;
-use sdl2::EventPump;
 use serial::{build_serial_jump_table, Serial};
 use vexide_simulator_protocol::{Command, CompMode, CompetitionMode, Event, LogLevel};
 use wasmtime::*;
