@@ -14,7 +14,7 @@ use display::DisplayCtx;
 use serial::{build_serial_jump_table, Serial};
 use vexide_simulator_protocol::{Command, CompMode, CompetitionMode, Event, LogLevel};
 use wasmtime::*;
-use wasmtime_wasi::{WasiCtx, WasiView};
+use wasmtime_wasi::{preview1::WasiP1Ctx, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::{
     protocol::{self, Log, Protocol},
@@ -43,8 +43,7 @@ pub struct SdkState {
     protocol: Protocol,
     is_executing: bool,
     serial: Serial,
-    wasi: WasiCtx,
-    resources: ResourceTable,
+    wasi: WasiP1Ctx,
 }
 
 impl SdkState {
@@ -65,10 +64,11 @@ impl SdkState {
             protocol,
             is_executing: false,
             serial: Serial::new(),
-            wasi: WasiCtx::builder()
+            wasi: WasiCtxBuilder::new()
                 .allow_blocking_current_thread(true)
-                .build(),
-            resources: ResourceTable::new(),
+                .allow_tcp(false)
+                .allow_udp(false)
+                .build_p1(),
         }
     }
 
@@ -148,22 +148,16 @@ impl SdkState {
     pub fn display_ctx(&mut self) -> DisplayCtx {
         self.display.ctx(&mut self.protocol)
     }
+
+    pub fn wasi(&mut self) -> &mut WasiP1Ctx {
+        &mut self.wasi
+    }
 }
 
 impl Log for SdkState {
     fn log(&mut self, level: LogLevel, message: String) -> protocol::Result<()> {
         self.protocol.send(&Event::Log { level, message })?;
         Ok(())
-    }
-}
-
-impl WasiView for SdkState {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
-    }
-
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.resources
     }
 }
 

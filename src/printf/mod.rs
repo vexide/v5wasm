@@ -187,14 +187,15 @@ pub mod argument {
         Isize(isize),
     }
 
+    #[allow(clippy::unnecessary_cast)]
     impl From<SignedInt> for i64 {
         fn from(num: SignedInt) -> Self {
             match num {
                 SignedInt::Int(x) => x as i64,
                 SignedInt::Char(x) => x as i64,
                 SignedInt::Short(x) => x as i64,
-                SignedInt::Long(x) => x,
-                SignedInt::LongLong(x) => x,
+                SignedInt::Long(x) => x as i64,
+                SignedInt::LongLong(x) => x as i64,
                 SignedInt::Isize(x) => x as i64,
             }
         }
@@ -237,14 +238,15 @@ pub mod argument {
         Isize(usize),
     }
 
+    #[allow(clippy::unnecessary_cast)]
     impl From<UnsignedInt> for u64 {
         fn from(num: UnsignedInt) -> Self {
             match num {
                 UnsignedInt::Int(x) => x as u64,
                 UnsignedInt::Char(x) => x as u64,
                 UnsignedInt::Short(x) => x as u64,
-                UnsignedInt::Long(x) => x,
-                UnsignedInt::LongLong(x) => x,
+                UnsignedInt::Long(x) => x as u64,
+                UnsignedInt::LongLong(x) => x as u64,
                 UnsignedInt::Isize(x) => x as u64,
             }
         }

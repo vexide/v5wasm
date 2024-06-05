@@ -180,6 +180,8 @@ fn start(args: Args, sdl_request_channel: mpsc::Sender<SdlRequest>) -> Result<()
         },
     )?;
 
+    wasmtime_wasi::preview1::add_to_linker_sync(&mut linker, |sdk| sdk.wasi())?;
+
     // Load and compile our module
 
     let instance = linker.instantiate(&mut store, &module)?;
