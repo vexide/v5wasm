@@ -4,9 +4,13 @@ use anyhow::{anyhow, bail, Context};
 use vexide_simulator_protocol::{Event, SerialData};
 use wasmtime::*;
 
-use crate::{protocol::Protocol, sdk::SdkState};
+use crate::{
+    printf::{self, format, output::display, WasmVaList},
+    protocol::Protocol,
+    sdk::SdkState,
+};
 
-use super::JumpTableBuilder;
+use super::{JumpTableBuilder, MemoryExt};
 
 // MARK: Jump table
 
@@ -67,7 +71,88 @@ pub fn build_serial_jump_table(memory: Memory, builder: &mut JumpTableBuilder) {
             Ok(num_free.unwrap_or(0))
         },
     );
-    // TODO: vex_printf and related functions
+
+    // vex_vprintf
+    builder.insert(
+        0x0f0,
+        move |mut caller: Caller<'_, SdkState>, format_ptr: u32, args: u32| -> Result<i32> {
+            let fmt_str = memory.read_c_string(&caller, format_ptr as usize)?;
+            let va_list = WasmVaList::new(args, memory);
+            let mut buf = String::new();
+            let written = format(
+                fmt_str.as_bytes(),
+                va_list,
+                &caller,
+                printf::output::fmt_write(&mut buf),
+            );
+            if written == -1 {
+                return Ok(-1);
+            }
+            let is_err = caller
+                .data_mut()
+                .serial
+                .write_all(1, buf.as_bytes())
+                .is_err();
+            if is_err {
+                return Ok(-1);
+            }
+            Ok(written)
+        },
+    );
+
+    // vex_vsprintf
+    builder.insert(
+        0x0f4,
+        move |mut caller: Caller<'_, SdkState>,
+              buffer: u32,
+              format_ptr: u32,
+              args: u32|
+              -> Result<i32> {
+            let fmt_str = memory.read_c_string(&caller, format_ptr as usize)?;
+            let va_list = WasmVaList::new(args, memory);
+            let mut buf = String::new();
+            let written = format(
+                fmt_str.as_bytes(),
+                va_list,
+                &caller,
+                printf::output::fmt_write(&mut buf),
+            );
+            if written == -1 {
+                return Ok(-1);
+            }
+            memory.data_mut(&mut caller)[buffer as usize..][..buf.len()]
+                .copy_from_slice(buf.as_bytes());
+            Ok(written)
+        },
+    );
+
+    // vex_vsnprintf
+    builder.insert(
+        0x0f8,
+        move |mut caller: Caller<'_, SdkState>,
+              buffer: u32,
+              size: u32,
+              format_ptr: u32,
+              args: u32|
+              -> Result<i32> {
+            let fmt_str = memory.read_c_string(&caller, format_ptr as usize)?;
+            let va_list = WasmVaList::new(args, memory);
+            let mut buf = String::new();
+            let written = format(
+                fmt_str.as_bytes(),
+                va_list,
+                &caller,
+                printf::output::fmt_write(&mut buf),
+            );
+            if written == -1 {
+                return Ok(-1);
+            }
+            let len = std::cmp::min(size as usize, buf.len());
+            memory.data_mut(&mut caller)[buffer as usize..][..len]
+                .copy_from_slice(&buf.as_bytes()[..len]);
+            Ok(written)
+        },
+    );
 }
 
 // MARK: API
@@ -94,6 +179,19 @@ impl Serial {
                 let count = self
                     .stdout_buffer
                     .write(buffer)
+                    .context("Failed to write to stdout")?;
+                Ok(count)
+            }
+            _ => Err(anyhow!("Invalid channel")),
+        }
+    }
+
+    pub fn write_all(&mut self, channel: u32, buffer: &[u8]) -> Result<()> {
+        match channel {
+            1 => {
+                let count = self
+                    .stdout_buffer
+                    .write_all(buffer)
                     .context("Failed to write to stdout")?;
                 Ok(count)
             }
