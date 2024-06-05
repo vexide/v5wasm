@@ -249,7 +249,7 @@ impl Inputs {
         if lazy {
             return Ok(Some(controller));
         }
-        if let Some(guid) = controller.sdl_guid.clone() {
+        if let Some(guid) = controller.sdl_guid {
             let (tx, rx) = oneshot::channel();
             let request = SdlRequest::V5Controller { guid, response: tx };
             self.request_channel.send(request).ok();

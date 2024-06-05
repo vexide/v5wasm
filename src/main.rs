@@ -4,7 +4,7 @@ use std::{
     thread,
 };
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use bytes::{Buf, Bytes};
 use clap::Parser as _;
 use fs_err as fs;
@@ -15,8 +15,11 @@ use sdk::{
     display::{BLACK, WHITE},
     SdlRequest,
 };
-use sdl2::EventPump;
-use vexide_simulator_protocol::{Command, Event, VCodeSig};
+use sdl2::{
+    controller::{Axis, Button},
+    EventPump,
+};
+use vexide_simulator_protocol::{Command, ControllerState, Event, VCodeSig};
 use wasmparser::{Parser, Payload};
 use wasmtime::*;
 
@@ -233,7 +236,55 @@ fn main() -> Result<()> {
                 event_pump.pump_events();
             }
             SdlRequest::V5Controller { guid, response } => {
-                todo!();
+                let val = || {
+                    let joysticks = controller_subsystem
+                        .num_joysticks()
+                        .map_err(|s| anyhow!(s))?;
+                    for idx in 0..joysticks {
+                        if controller_subsystem.is_game_controller(idx) {
+                            let Ok(joystick) = joystick_subsystem.open(idx) else {
+                                break;
+                            };
+                            if joystick.guid() != guid || !joystick.attached() {
+                                continue;
+                            }
+                            let Ok(sdl_controller) = controller_subsystem.open(idx) else {
+                                continue;
+                            };
+
+                            return anyhow::Ok(Some(ControllerState {
+                                axis1: (sdl_controller.axis(Axis::LeftX) as i32) * 127
+                                    / (i16::MAX as i32),
+                                axis2: -(sdl_controller.axis(Axis::LeftY) as i32) * 127
+                                    / (i16::MAX as i32),
+                                axis3: -(sdl_controller.axis(Axis::RightY) as i32) * 127
+                                    / (i16::MAX as i32),
+                                axis4: (sdl_controller.axis(Axis::RightX) as i32) * 127
+                                    / (i16::MAX as i32),
+                                button_l1: sdl_controller.button(Button::LeftShoulder),
+                                button_l2: sdl_controller.axis(Axis::TriggerLeft) > 0,
+                                button_r1: sdl_controller.button(Button::RightShoulder),
+                                button_r2: sdl_controller.axis(Axis::TriggerRight) > 0,
+                                button_up: sdl_controller.button(Button::DPadUp),
+                                button_down: sdl_controller.button(Button::DPadDown),
+                                button_left: sdl_controller.button(Button::DPadLeft),
+                                button_right: sdl_controller.button(Button::DPadRight),
+                                button_x: sdl_controller.button(Button::X),
+                                button_b: sdl_controller.button(Button::B),
+                                button_y: sdl_controller.button(Button::Y),
+                                button_a: sdl_controller.button(Button::A),
+                                battery_capacity: 0,
+                                battery_level: 0,
+                                button_all: false,
+                                button_sel: false,
+                                flags: 0,
+                            }));
+                        }
+                    }
+                    Ok(None)
+                };
+
+                _ = response.send(val());
             }
         }
     }
