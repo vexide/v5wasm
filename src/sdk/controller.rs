@@ -1,9 +1,7 @@
 use std::sync::mpsc;
 
 use anyhow::{anyhow, Context};
-use sdl2::{
-    joystick::Guid,
-};
+use sdl2::joystick::Guid;
 use vexide_simulator_protocol::{ControllerState, ControllerUpdate};
 use wasmtime::*;
 

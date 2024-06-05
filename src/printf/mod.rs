@@ -35,7 +35,6 @@ use bytemuck::{AnyBitPattern, NoUninit};
 pub use parser::format;
 use wasmtime::{AsContext, AsContextMut, Memory};
 
-
 #[derive(Debug, Clone)]
 pub struct WasmVaList {
     base_ptr: u32,
@@ -71,8 +70,6 @@ impl WasmVaList {
 
 pub mod argument {
     use std::{ffi::*, fmt};
-
-    
 
     bitflags::bitflags! {
         /// Flags field.

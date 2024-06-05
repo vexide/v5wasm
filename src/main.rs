@@ -15,9 +15,7 @@ use sdk::{
     display::{BLACK, WHITE},
     SdlRequest,
 };
-use sdl2::{
-    controller::{Axis, Button},
-};
+use sdl2::controller::{Axis, Button};
 use vexide_simulator_protocol::{Command, ControllerState, Event, VCodeSig};
 use wasmparser::{Parser, Payload};
 use wasmtime::*;

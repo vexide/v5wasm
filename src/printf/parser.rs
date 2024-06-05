@@ -2,7 +2,7 @@ use std::ffi::*;
 
 use super::{Argument, DoubleFormat, Flags, SignedInt, Specifier, UnsignedInt, WasmVaList};
 use itertools::Itertools;
-use wasmtime::{AsContext};
+use wasmtime::AsContext;
 
 fn next_char(sub: &[u8]) -> &[u8] {
     sub.get(1..).unwrap_or(&[])
