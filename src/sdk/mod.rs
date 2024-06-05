@@ -98,7 +98,9 @@ impl SdkState {
     /// Process a command.
     pub fn execute_command(&mut self, cmd: Command) -> anyhow::Result<()> {
         match cmd {
-            Command::Handshake { .. } => unreachable!(),
+            Command::Handshake { .. } => {
+                panic!("Cannot execute a handshake command after the simulator has started.")
+            }
             Command::Touch { pos, event } => todo!(),
             Command::ControllerUpdate(primary, partner) => {
                 self.inputs.set_controller(0, primary)?;
