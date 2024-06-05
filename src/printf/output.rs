@@ -316,11 +316,11 @@ pub fn fmt_write(w: &mut impl fmt::Write) -> impl FnMut(Argument) -> c_int + '_ 
 /// [`fmt_write`], but may be the only option.
 ///
 /// This shares the same caveats as [`fmt_write`].
-pub fn display<'a, T: AsContext>(
+pub fn display<T: AsContext>(
     format: CString,
     va_list: WasmVaList,
-    ctx: &'a T,
-) -> VaListDisplay<'a, T> {
+    ctx: &T,
+) -> VaListDisplay<'_, T> {
     VaListDisplay {
         format,
         va_list,
@@ -375,101 +375,6 @@ impl<'a, T: AsContext> fmt::Display for VaListDisplay<'a, T> {
             Err(fmt::Error)
         } else {
             Ok(())
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-mod yes_std {
-    use std::io;
-
-    use super::*;
-
-    struct FmtWriter<T: io::Write>(T, io::Result<()>);
-
-    impl<T: io::Write> fmt::Write for FmtWriter<T> {
-        fn write_str(&mut self, s: &str) -> fmt::Result {
-            match self.0.write_all(s.as_bytes()) {
-                Ok(()) => Ok(()),
-                Err(e) => {
-                    self.1 = Err(e);
-                    Err(fmt::Error)
-                }
-            }
-        }
-    }
-
-    struct IoWriteCounter<'a, T: io::Write>(&'a mut T, usize);
-
-    impl<'a, T: io::Write> io::Write for IoWriteCounter<'a, T> {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.0.write_all(buf)?;
-            self.1 += buf.len();
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            self.0.flush()
-        }
-    }
-
-    fn write_bytes(
-        w: &mut impl io::Write,
-        flags: Flags,
-        width: c_int,
-        precision: Option<c_int>,
-        b: &[u8],
-    ) -> io::Result<()> {
-        let precision = precision.unwrap_or(b.len() as c_int);
-        let b = b.get(..(b.len().min(precision as usize))).unwrap_or(&[]);
-
-        if flags.contains(Flags::LEFT_ALIGN) {
-            w.write_all(b)?;
-            for _ in 0..((width as usize).saturating_sub(b.len())) {
-                w.write_all(b" ")?;
-            }
-            Ok(())
-        } else {
-            for _ in 0..((width as usize).saturating_sub(b.len())) {
-                w.write_all(b" ")?;
-            }
-            w.write_all(b)
-        }
-    }
-
-    /// Write to a struct that implements [`io::Write`].
-    ///
-    /// This shares the same caveats as [`fmt_write`], except that non-UTF-8
-    /// data is supported.
-    pub fn io_write(w: &mut impl io::Write) -> impl FnMut(Argument) -> c_int + '_ {
-        use io::Write;
-        move |Argument {
-                  flags,
-                  width,
-                  precision,
-                  specifier,
-              }| {
-            let mut w = IoWriteCounter(w, 0);
-            let mut w = &mut w;
-            let res = match specifier {
-                Specifier::Percent => w.write_all(b"%"),
-                Specifier::Bytes(data) => write_bytes(w, flags, width, precision, data),
-                Specifier::String(data) => write_bytes(w, flags, width, precision, data.to_bytes()),
-                _ => {
-                    let mut writer = FmtWriter(&mut w, Ok(()));
-                    fmt_write(&mut writer)(Argument {
-                        flags,
-                        width,
-                        precision,
-                        specifier,
-                    });
-                    writer.1
-                }
-            };
-            match res {
-                Ok(_) => w.1 as c_int,
-                Err(_) => -1,
-            }
         }
     }
 }

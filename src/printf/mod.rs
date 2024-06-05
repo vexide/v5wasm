@@ -193,8 +193,8 @@ pub mod argument {
                 SignedInt::Int(x) => x as i64,
                 SignedInt::Char(x) => x as i64,
                 SignedInt::Short(x) => x as i64,
-                SignedInt::Long(x) => x as i64,
-                SignedInt::LongLong(x) => x as i64,
+                SignedInt::Long(x) => x,
+                SignedInt::LongLong(x) => x,
                 SignedInt::Isize(x) => x as i64,
             }
         }
@@ -243,8 +243,8 @@ pub mod argument {
                 UnsignedInt::Int(x) => x as u64,
                 UnsignedInt::Char(x) => x as u64,
                 UnsignedInt::Short(x) => x as u64,
-                UnsignedInt::Long(x) => x as u64,
-                UnsignedInt::LongLong(x) => x as u64,
+                UnsignedInt::Long(x) => x,
+                UnsignedInt::LongLong(x) => x,
                 UnsignedInt::Isize(x) => x as u64,
             }
         }

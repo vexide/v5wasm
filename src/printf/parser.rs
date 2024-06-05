@@ -11,7 +11,7 @@ fn next_char(sub: &[u8]) -> &[u8] {
 /// Parse the [Flags field](https://en.wikipedia.org/wiki/Printf_format_string#Flags_field).
 fn parse_flags(mut sub: &[u8]) -> (Flags, &[u8]) {
     let mut flags: Flags = Flags::empty();
-    while let Some(&ch) = sub.get(0) {
+    while let Some(&ch) = sub.first() {
         flags.insert(match ch {
             b'-' => Flags::LEFT_ALIGN,
             b'+' => Flags::PREPEND_PLUS,
@@ -33,10 +33,10 @@ fn parse_width<'a>(
     ctx: &mut impl AsContext,
 ) -> (c_int, &'a [u8]) {
     let mut width: c_int = 0;
-    if sub.get(0) == Some(&b'*') {
+    if sub.first() == Some(&b'*') {
         return (*args.next(ctx), next_char(sub));
     }
-    while let Some(&ch) = sub.get(0) {
+    while let Some(&ch) = sub.first() {
         match ch {
             // https://rust-malaysia.github.io/code/2020/07/11/faster-integer-parsing.html#the-bytes-solution
             b'0'..=b'9' => width = width * 10 + (ch & 0x0f) as c_int,
@@ -53,7 +53,7 @@ fn parse_precision<'a>(
     args: &mut WasmVaList,
     ctx: &mut impl AsContext,
 ) -> (Option<c_int>, &'a [u8]) {
-    match sub.get(0) {
+    match sub.first() {
         Some(&b'.') => {
             let (prec, sub) = parse_width(next_char(sub), args, ctx);
             (Some(prec), sub)
@@ -106,7 +106,7 @@ impl Length {
 
 /// Parse the [Length field](https://en.wikipedia.org/wiki/Printf_format_string#Length_field).
 fn parse_length(sub: &[u8]) -> (Length, &[u8]) {
-    match sub.get(0).copied() {
+    match sub.first().copied() {
         Some(b'h') => match sub.get(1).copied() {
             Some(b'h') => (Length::Char, sub.get(2..).unwrap_or(&[])),
             _ => (Length::Short, next_char(sub)),
@@ -160,7 +160,7 @@ pub fn format(
         let (precision, sub) = parse_precision(sub, &mut args, &mut ctx);
         let (length, sub) = parse_length(sub);
         let ch = sub
-            .get(0)
+            .first()
             .unwrap_or(if next.is_some() { &b'%' } else { &0 });
         err!(handler(Argument {
             flags,
