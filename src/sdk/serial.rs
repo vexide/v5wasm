@@ -5,7 +5,7 @@ use vexide_simulator_protocol::{Event, SerialData};
 use wasmtime::*;
 
 use crate::{
-    printf::{self, format, output::display, WasmVaList},
+    printf::{self, format, WasmVaList},
     protocol::Protocol,
     sdk::SdkState,
 };
@@ -189,11 +189,10 @@ impl Serial {
     pub fn write_all(&mut self, channel: u32, buffer: &[u8]) -> Result<()> {
         match channel {
             1 => {
-                let count = self
-                    .stdout_buffer
+                self.stdout_buffer
                     .write_all(buffer)
                     .context("Failed to write to stdout")?;
-                Ok(count)
+                Ok(())
             }
             _ => Err(anyhow!("Invalid channel")),
         }
