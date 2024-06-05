@@ -25,6 +25,7 @@ use wasmtime::*;
 
 use crate::sdk::{JumpTable, SdkState};
 
+mod printf;
 mod protocol;
 mod sdk;
 

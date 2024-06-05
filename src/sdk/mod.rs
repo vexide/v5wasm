@@ -1,4 +1,9 @@
-use std::{collections::HashMap, ffi::CStr, sync::mpsc, time::Instant};
+use std::{
+    collections::HashMap,
+    ffi::{CStr, CString, FromBytesUntilNulError},
+    sync::mpsc,
+    time::Instant,
+};
 
 use anyhow::bail;
 use bitflags::bitflags;
@@ -296,24 +301,40 @@ pub trait MemoryExt {
     ///
     /// The string is guaranteed to exist for its entire lifetime, but because it is borrowed, it isn't possible for
     /// API consumers to call back into WASM code while holding it.
-    fn read_c_string<'a>(&self, store: &'a impl AsContext, offset: usize) -> Option<&'a str>;
+    fn c_str<'a>(
+        &self,
+        store: &'a impl AsContext,
+        offset: usize,
+    ) -> Result<&'a CStr, FromBytesUntilNulError>;
+    fn read_c_string(
+        &self,
+        store: &impl AsContext,
+        offset: usize,
+    ) -> Result<CString, FromBytesUntilNulError>;
 }
 
 impl MemoryExt for Memory {
-    fn read_c_string<'a>(&self, store: &'a impl AsContext, offset: usize) -> Option<&'a str> {
+    fn c_str<'a>(
+        &self,
+        store: &'a impl AsContext,
+        offset: usize,
+    ) -> Result<&'a CStr, FromBytesUntilNulError> {
         let bytes = &self.data(store)[offset..];
-        let c_str = CStr::from_bytes_until_nul(bytes).ok()?;
-        c_str.to_str().ok()
+        CStr::from_bytes_until_nul(bytes)
+    }
+    fn read_c_string(
+        &self,
+        store: &impl AsContext,
+        offset: usize,
+    ) -> Result<CString, FromBytesUntilNulError> {
+        self.c_str(store, offset).map(|s| s.to_owned())
     }
 }
 
-/// Utility macro for cloning a C-style string into simulator memory, returning a Result.
+/// Utility macro for cloning a C-style string into simulator memory.
 macro_rules! clone_c_string {
     ($addr:expr, from $caller:ident using $memory:ident) => {
-        $memory
-            .read_c_string(&mut $caller, $addr)
-            .context("Failed to read C-string")
-            .map(|s| s.to_string())
+        $memory.c_str(&mut $caller, $addr)?.to_str()?.to_owned()
     };
 }
 pub(crate) use clone_c_string;
