@@ -551,9 +551,21 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
               y_pos: i32,
               opaque: i32,
               format_ptr: u32,
-              _args: u32|
+              args: u32|
               -> Result<()> {
             let format = clone_c_string!(format_ptr as usize, from caller using memory)?;
+
+            let args0 = memory.data(&mut caller)[(args as usize)..][..8].to_vec();
+            let argsu32: &[u32] = bytemuck::cast_slice(&args0);
+            let str0 = clone_c_string!(argsu32[0] as usize, from caller using memory)?;
+            let str1 = clone_c_string!(argsu32[1] as usize, from caller using memory)?;
+            warn_bt!(
+                caller,
+                "vexDisplayVPrintf: va_list ptr = {:x?}, items = {:x?}, parsed c strings = {:?}",
+                args,
+                argsu32,
+                (str0, str1)
+            )?;
 
             caller.data_mut().display_ctx().write(
                 V5Text {
