@@ -34,15 +34,18 @@ const HEADER_MAGIC: &[u8] = b"XVX5";
 /// file) and contain a V5 code signature in a custom section named `.cold_magic`.
 /// Programs may utilize the VEX V5 jump table to interact with simulated subsystems.
 ///
-/// A WASI environment is not provided.
+/// A WASI `preview1` environment is provided to allow C/C++ based programs to be run.
 #[derive(Debug, clap::Parser)]
 #[command(version)]
 struct Args {
     /// The path to the WebAssembly robot program that will be executed.
     program: PathBuf,
-    /// Skips the protocol handshake and immediately starts execution.
+    /// Skip the protocol handshake and immediately start execution.
     #[clap(long, short = 'I')]
     imply_start: bool,
+    /// Fall back to the default code signature if the program's code signature is missing or invalid.
+    #[clap(long, short = 'S')]
+    relaxed_code_sig: bool,
 }
 
 // const PROGRAM_TYPE_USER: u32 = 0;
@@ -80,17 +83,10 @@ impl ProgramOptions {
     }
 }
 
-/// Loads a user program from a file, parsing the cold header and creating a module.
-fn load_program(
-    engine: &Engine,
-    path: &Path,
-    protocol: &mut Protocol,
-) -> Result<(Module, ProgramOptions)> {
+fn parse_code_sig(program: &[u8], protocol: &mut Protocol) -> anyhow::Result<ProgramOptions> {
     const PROGRAM_OPTIONS_INVERT_DEFAULT_GRAPHICS_COLORS: u32 = 1 << 0;
     const PROGRAM_OPTIONS_KILL_THREADS_WHEN_MAIN_EXITS: u32 = 1 << 1;
     const PROGRAM_OPTIONS_INVERT_GRAPHICS_BASED_ON_THEME: u32 = 1 << 2;
-
-    let program = fs::read(path)?;
 
     // in vexide programs the cold header is stored in a section called ".cold_magic"
     let mut cold_header = None;
@@ -103,10 +99,7 @@ fn load_program(
             }
         }
     }
-
-    let mut cold_header = cold_header
-        .context("No cold header found in the program")
-        .unwrap();
+    let mut cold_header = cold_header.context("No cold header found in the program")?;
 
     // copy_to_bytes is used to remove the magic number from the start of the buffer
     let v_code_sig = VCodeSig::new(&cold_header);
@@ -130,6 +123,36 @@ fn load_program(
         invert_graphics_based_on_theme: options & PROGRAM_OPTIONS_INVERT_GRAPHICS_BASED_ON_THEME
             != 0,
     };
+    Ok(cold_header)
+}
+
+/// Loads a user program from a file, parsing the cold header and creating a module.
+fn load_program(
+    engine: &Engine,
+    path: &Path,
+    protocol: &mut Protocol,
+    args: &Args,
+) -> Result<(Module, ProgramOptions)> {
+    let program = fs::read(path)?;
+
+    let cold_header = parse_code_sig(&program, protocol);
+
+    let cold_header = if args.relaxed_code_sig {
+        cold_header.unwrap_or_else(|err| {
+            protocol
+                .warn(format!("Failed to parse the program's code signature: {err} (falling back to default)."))
+                .unwrap();
+            ProgramOptions {
+                program_type: 0,
+                owner: 2,
+                invert_default_graphics_colors: false,
+                kill_threads_when_main_exits: false,
+                invert_graphics_based_on_theme: false,
+            }
+        })
+    } else {
+        cold_header.context("Failed to parse the program's code signature (this error is recoverable with --relaxed-code-sig)")?
+    };
 
     // this operation will do a lot of JIT compilation so it's probably the slowest part of the program
     let module = Module::from_binary(engine, &program)?;
@@ -146,7 +169,7 @@ fn start(args: Args, sdl_request_channel: mpsc::Sender<SdlRequest>) -> Result<()
             .debug_info(true)
             .wasm_backtrace_details(WasmBacktraceDetails::Enable),
     )?;
-    let (module, cold_header) = load_program(&engine, &args.program, &mut protocol)
+    let (module, cold_header) = load_program(&engine, &args.program, &mut protocol, &args)
         .context("Failed to load robot program")?;
 
     protocol.info("Booting...")?;
@@ -200,10 +223,14 @@ fn start(args: Args, sdl_request_channel: mpsc::Sender<SdlRequest>) -> Result<()
     if args.imply_start {
         store.data_mut().execute_command(Command::StartExecution)?;
     }
-    store.data_mut().setup()?;
+    store
+        .data_mut()
+        .setup()
+        .context("Failed to setup the program for execution")?;
     // We should be ready to actually run the entrypoint now.
     store.data_mut().trace("Calling _entry()")?;
-    run.call(&mut store, ())?;
+    run.call(&mut store, ())
+        .context("Call to _entry() failed")?;
     Ok(())
 }
 
@@ -226,7 +253,7 @@ fn main() -> Result<()> {
     let joystick_subsystem = sdl.joystick().unwrap();
     let controller_subsystem = sdl.game_controller().unwrap();
 
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         start(args, tx).unwrap();
     });
 
@@ -288,6 +315,8 @@ fn main() -> Result<()> {
             }
         }
     }
+
+    handle.join().unwrap();
 
     Ok(())
 }
