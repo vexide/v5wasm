@@ -5,10 +5,7 @@
             "type": "cargo",
             "command": "build",
             "args": [
-                "--target",
-                "wasm32-unknown-unknown",
-                "--example",
-                "basic"
+                "--release"
             ],
             "problemMatcher": [
                 "$rustc"
@@ -17,10 +14,7 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "options": {
-                "cwd": "${workspaceFolder}/../vexide"
-            },
-            "label": "rust: build vexide",
+            "label": "rust: cargo build (release)"
         }
     ]
 }
