@@ -53,11 +53,11 @@ Check out `.vscode/launch.json` and `.vscode/tasks.json` for an example of what 
 
 What's working:
 
-- ALL of the serial SDK!
-- The controller SDK
-- Some of the display SDK
-- Some of the system and tasks SDK
-- A little bit of the competition SDK
+- ALL of the serial SDK! (100%)
+- The display SDK (98%)
+- The controller SDK (90%)
+- The competition SDK (50%)
+- Some of the system and tasks SDK (25%-ish)
 
 An incomplete list of what's missing:
 

@@ -311,6 +311,40 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
     });
 
+    // vexDisplayStringWidthGet
+    builder.insert(
+        0x6c0,
+        move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
+            let string = clone_c_string!(string_ptr as usize, from caller using memory);
+
+            let sdk = caller.data_mut();
+            let font_size = sdk.display.last_font_size;
+            let size = sdk.display_ctx().get_text_metrics(V5Text {
+                data: string,
+                font_family: V5FontFamily::UserMono,
+                font_size,
+            })?;
+            Ok(size.width as u32)
+        },
+    );
+
+    // vexDisplayStringHeightGet
+    builder.insert(
+        0x6c4,
+        move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
+            let string = clone_c_string!(string_ptr as usize, from caller using memory);
+
+            let sdk = caller.data_mut();
+            let font_size = sdk.display.last_font_size;
+            let size = sdk.display_ctx().get_text_metrics(V5Text {
+                data: string,
+                font_family: V5FontFamily::UserMono,
+                font_size,
+            })?;
+            Ok(size.height as u32)
+        },
+    );
+
     // vexDisplayClipRegionSet
     builder.insert(
         0x794,
@@ -510,40 +544,6 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         },
     );
 
-    // vexDisplayStringWidthGet
-    builder.insert(
-        0x6c0,
-        move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
-            let string = clone_c_string!(string_ptr as usize, from caller using memory);
-
-            let sdk = caller.data_mut();
-            let font_size = sdk.display.last_font_size;
-            let size = sdk.display_ctx().get_text_metrics(V5Text {
-                data: string,
-                font_family: V5FontFamily::UserMono,
-                font_size,
-            })?;
-            Ok(size.width as u32)
-        },
-    );
-
-    // vexDisplayStringHeightGet
-    builder.insert(
-        0x6c4,
-        move |mut caller: Caller<'_, SdkState>, string_ptr: i32| {
-            let string = clone_c_string!(string_ptr as usize, from caller using memory);
-
-            let sdk = caller.data_mut();
-            let font_size = sdk.display.last_font_size;
-            let size = sdk.display_ctx().get_text_metrics(V5Text {
-                data: string,
-                font_family: V5FontFamily::UserMono,
-                font_size,
-            })?;
-            Ok(size.height as u32)
-        },
-    );
-
     // vexDisplayVPrintf
     builder.insert(
         0x680,
@@ -626,6 +626,55 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
         },
     );
 
+    // vexDisplayVBigString
+    builder.insert(
+        0x68c,
+        move |mut caller: Caller<'_, SdkState>, line_number: i32, format_ptr: u32, args: u32| {
+            let format = memory.read_c_string(&caller, format_ptr as usize)?;
+            let va_list = WasmVaList::new(args, memory);
+            let data = display(format, va_list, &caller).to_string();
+
+            caller.data_mut().display_ctx().write(
+                V5Text {
+                    data,
+                    font_family: Default::default(),
+                    font_size: V5FontSize::Large,
+                },
+                TextLocation::Line { line: line_number },
+                true,
+            )?;
+            Ok(())
+        },
+    );
+
+    // vexDisplayVBigStringAt
+    builder.insert(
+        0x690,
+        move |mut caller: Caller<'_, SdkState>,
+              x_pos: i32,
+              y_pos: i32,
+              format_ptr: u32,
+              args: u32|
+              -> Result<()> {
+            let format = memory.read_c_string(&caller, format_ptr as usize)?;
+            let va_list = WasmVaList::new(args, memory);
+            let data = display(format, va_list, &caller).to_string();
+
+            caller.data_mut().display_ctx().write(
+                V5Text {
+                    data,
+                    font_family: Default::default(),
+                    font_size: V5FontSize::Large,
+                },
+                TextLocation::Coordinates {
+                    point: [x_pos, y_pos].into(),
+                },
+                true,
+            )?;
+            Ok(())
+        },
+    );
+
     // vexDisplayVSmallStringAt
     builder.insert(
         0x6b0,
@@ -651,6 +700,60 @@ pub fn build_display_jump_table(memory: Memory, builder: &mut JumpTableBuilder) 
                 true,
             )?;
             Ok(())
+        },
+    );
+
+    const LINE_NUM_OFFSET: i32 = 34;
+    const LINE_HEIGHT: i32 = 20;
+
+    let display_centered_text = |sdk: &mut SdkState, text: V5Text, line: i32| {
+        let size = sdk.display_ctx().get_text_metrics(text.clone())?;
+        // FIXME: why is this a usize?
+        let x = (DISPLAY_WIDTH - i32::try_from(size.width).unwrap()) / 2;
+        let y = LINE_NUM_OFFSET + line * LINE_HEIGHT;
+        sdk.display_ctx().write(
+            text,
+            TextLocation::Coordinates {
+                point: [x, y].into(),
+            },
+            true,
+        )?;
+        Ok(())
+    };
+
+    // vexDisplayVCenteredString
+    builder.insert(
+        0x6b4,
+        move |mut caller: Caller<'_, SdkState>, line_number: i32, format_ptr: u32, args: u32| {
+            let format = memory.read_c_string(&caller, format_ptr as usize)?;
+            let va_list = WasmVaList::new(args, memory);
+            let data = display(format, va_list, &caller).to_string();
+
+            let sdk = caller.data_mut();
+            let text = V5Text {
+                data,
+                font_family: V5FontFamily::UserMono,
+                font_size: V5FontSize::Normal,
+            };
+            display_centered_text(sdk, text, line_number)
+        },
+    );
+
+    // vexDisplayVBigCenteredString
+    builder.insert(
+        0x6b4,
+        move |mut caller: Caller<'_, SdkState>, line_number: i32, format_ptr: u32, args: u32| {
+            let format = memory.read_c_string(&caller, format_ptr as usize)?;
+            let va_list = WasmVaList::new(args, memory);
+            let data = display(format, va_list, &caller).to_string();
+
+            let sdk = caller.data_mut();
+            let text = V5Text {
+                data,
+                font_family: V5FontFamily::UserMono,
+                font_size: V5FontSize::Large,
+            };
+            display_centered_text(sdk, text, line_number)
         },
     );
 }
