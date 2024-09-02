@@ -1,3 +1,7 @@
+> [!IMPORTANT]  
+> This project is no longer officially supported. If possible, we advise you to use the
+> [QEMU-based simulator](https://github.com/vexide/vex-v5-qemu) instead.
+
 # V5Wasm
 
 > Execute vexide programs using a WebAssembly sandbox.
