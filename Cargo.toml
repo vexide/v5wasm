@@ -25,7 +25,7 @@ snafu = "0.8.3"
 tinybmp = "0.5.0"
 vexide-simulator-protocol = { git = "https://github.com/vexide/simulator-protocol.git", version = "0.1.0" }
 wasmparser = "0.207.0"
-wasmtime = { version = "21.0.1", default-features = false, features = [
+wasmtime = { version = "23.0.3", default-features = false, features = [
     "std",
     # "cache",
     "parallel-compilation",
