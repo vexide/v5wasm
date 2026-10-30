@@ -1,6 +1,8 @@
 > [!IMPORTANT]  
-> This project is no longer officially supported. If possible, we advise you to use the
-> [QEMU-based simulator](https://github.com/vexide/vex-v5-qemu) instead.
+> We've discontinued this project because vexide can now run directly on desktop computers (without needed WebAssembly).
+> If possible, we advise you to instead use tools such as:
+> - [RoboScope](https://github.com/vexide/roboscope#readme), which provides enhanced simulation capabilities for vexide programs running on your desktop,
+> - or vexide's [vex-v5-qemu](https://github.com/vexide/vex-v5-qemu), which can emulate some programs built for VEX V5.
 
 # V5Wasm
 
